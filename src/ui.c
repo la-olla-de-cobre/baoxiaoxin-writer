@@ -208,7 +208,8 @@ void UI_Create(HWND hwndParent, AppUI *ui)
         0, 0, 0, 0, hwndParent, (HMENU)IDC_CHK_USE_PANEL, NULL, NULL);
     SendMessageW(ui->hwndChkUsePanel, WM_SETFONT, (WPARAM)ui->hFontUI, TRUE);
 
-    ui->hwndChkCodeMode = CreateWindowExW(0, L"BUTTON", L"代码输入模式（忽略行首缩进）",
+    ui->hwndChkCodeMode = CreateWindowExW(0, L"BUTTON",
+        L"在线网站 Python 补偿（含行首缩进过滤）",
         WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
         0, 0, 0, 0, hwndParent, (HMENU)IDC_CHK_CODE_MODE, NULL, NULL);
     SendMessageW(ui->hwndChkCodeMode, WM_SETFONT, (WPARAM)ui->hFontUI, TRUE);
