@@ -13,10 +13,15 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Install MinGW
-      uses: egor-tensin/setup-mingw@v2
+    - name: Install MinGW toolchain
+      uses: msys2/setup-msys2@v2
       with:
-        platform: x86
+        msystem: MINGW32
+        update: true
+        install: >-
+          mingw-w64-i686-gcc
+          mingw-w64-i686-binutils
+          make
     - name: Build
-      shell: cmd
-      run: mingw32-make TARGET=KeyboardSim.exe
+      shell: msys2 {0}
+      run: make TARGET=KeyboardSim.exe
