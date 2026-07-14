@@ -11,6 +11,8 @@ void Config_Load(AppConfig *cfg, const wchar_t *iniPath)
                                                     0, iniPath);
     cfg->alwaysOnTop  = (BOOL)GetPrivateProfileIntW(L"Settings", L"AlwaysOnTop",
                                                     0, iniPath);
+    cfg->codeInputMode = (BOOL)GetPrivateProfileIntW(
+        L"Settings", L"CodeInputMode", 0, iniPath);
     GetPrivateProfileStringW(L"Settings", L"LastDir", L"",
                              cfg->lastDir, MAX_PATH, iniPath);
     GetPrivateProfileStringW(L"Settings", L"DbPath", L"",
@@ -35,6 +37,9 @@ void Config_Save(const AppConfig *cfg, const wchar_t *iniPath)
 
     WritePrivateProfileStringW(L"Settings", L"AlwaysOnTop",
                                cfg->alwaysOnTop ? L"1" : L"0", iniPath);
+
+    WritePrivateProfileStringW(L"Settings", L"CodeInputMode",
+                               cfg->codeInputMode ? L"1" : L"0", iniPath);
 
     WritePrivateProfileStringW(L"Settings", L"LastDir",
                                cfg->lastDir, iniPath);
