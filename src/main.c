@@ -6,6 +6,7 @@
 #include <commdlg.h>
 #include <commctrl.h>
 #include <shlobj.h>
+#include <shellapi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <wchar.h>
@@ -42,15 +43,7 @@ static void StopInput(void)
 {
     if (!g_worker) return;
     Worker_Stop(g_worker);
-    if (g_hThread) {
-        WaitForSingleObject(g_hThread, 3000);
-        CloseHandle(g_hThread);
-        g_hThread = NULL;
-    }
-    Worker_Free(g_worker);
-    g_worker = NULL;
-    SetState(STATE_IDLE);
-    UI_UpdateProgress(&g_ui, 0, 0);
+    UI_SetStatus(&g_ui, L"正在停止输入...");
 }
 
 // 开始输入（根据复选框选择数据源）
@@ -94,6 +87,8 @@ static void StartInput(void)
     g_worker->text      = text;
     g_worker->textLen   = textLen;
     g_worker->delayMs   = GetCurrentDelay();
+    g_worker->codeInputMode =
+        (SendMessageW(g_ui.hwndChkCodeMode, BM_GETCHECK, 0, 0) == BST_CHECKED);
     g_worker->hwndMain  = g_ui.hwndMain;
 
     g_hThread = Worker_Start(g_worker);
@@ -412,6 +407,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         RegisterHotKey(hwnd, HOTKEY_STOP, MOD_CONTROL | MOD_ALT, 'S');
         SendMessageW(g_ui.hwndChkTopmost, BM_SETCHECK,
             g_cfg.alwaysOnTop ? BST_CHECKED : BST_UNCHECKED, 0);
+        SendMessageW(g_ui.hwndChkCodeMode, BM_SETCHECK,
+            g_cfg.codeInputMode ? BST_CHECKED : BST_UNCHECKED, 0);
         if (g_cfg.alwaysOnTop)
             SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 
@@ -485,6 +482,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
             return 0;
         }
+        if (id == IDC_CHK_CODE_MODE && code == BN_CLICKED) {
+            g_cfg.codeInputMode =
+                (SendMessageW(g_ui.hwndChkCodeMode, BM_GETCHECK, 0, 0) == BST_CHECKED);
+            return 0;
+        }
 
         if (id == IDC_COMBO_PRESET && code == CBN_SELCHANGE) {
             OnPresetChange();
@@ -540,10 +542,16 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         if (g_worker) {
             Worker_Stop(g_worker);
             if (g_hThread) {
-                WaitForSingleObject(g_hThread, 2000);
-                CloseHandle(g_hThread);
+                if (WaitForSingleObject(g_hThread, 2000) == WAIT_OBJECT_0) {
+                    CloseHandle(g_hThread);
+                    g_hThread = NULL;
+                    Worker_Free(g_worker);
+                    g_worker = NULL;
+                }
+            } else {
+                Worker_Free(g_worker);
+                g_worker = NULL;
             }
-            Worker_Free(g_worker);
         }
         Db_Close(&g_dbCtx);
         Config_Save(&g_cfg, g_iniPath);

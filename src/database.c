@@ -6,113 +6,10 @@
 #include <string.h>
 #include "database.h"
 
-// SQLite 函数指针全局变量
-static sqlite3_open_ptr         sqlite3_open;
-static sqlite3_open16_ptr       sqlite3_open16;
-static sqlite3_close_ptr        sqlite3_close;
-static sqlite3_exec_ptr         sqlite3_exec;
-static sqlite3_prepare_v2_ptr   sqlite3_prepare_v2;
-static sqlite3_step_ptr         sqlite3_step;
-static sqlite3_finalize_ptr     sqlite3_finalize;
-static sqlite3_column_text_ptr  sqlite3_column_text;
-static sqlite3_bind_text_ptr    sqlite3_bind_text;
-static sqlite3_last_insert_rowid_ptr sqlite3_last_insert_rowid;
-static void (*sqlite3_free_ptr)(void*);
-static int (*sqlite3_reset_ptr)(sqlite3_stmt*);
-
 // 辅助函数：显示错误消息
 static void ShowError(const wchar_t *msg)
 {
     MessageBoxW(NULL, msg, L"数据库错误", MB_ICONERROR);
-}
-
-// 加载SQLite DLL和函数指针
-static int LoadSQLiteDLL(DbContext *ctx)
-{
-    wchar_t dllPath[MAX_PATH];
-    wchar_t debugMsg[512];
-
-    // 尝试多种路径查找sqlite3.dll
-    const wchar_t *paths[] = {
-        L".\\sqlite3.dll",
-        L".\\sql3\\sqlite3.dll",
-        L"..\\sql3\\sqlite3.dll",
-        NULL
-    };
-
-    for (int i = 0; paths[i] != NULL; i++) {
-        // 尝试加载
-        ctx->hDll = LoadLibraryW(paths[i]);
-        if (ctx->hDll) {
-            // 成功找到DLL
-            wsprintfW(debugMsg, L"成功加载SQLite DLL: %s", paths[i]);
-            OutputDebugStringW(debugMsg);
-            goto load_functions;
-        }
-    }
-
-    // 如果上述路径都找不到，尝试从当前程序目录找
-    GetModuleFileNameW(NULL, dllPath, MAX_PATH);
-    wchar_t *slash = wcsrchr(dllPath, L'\\');
-    if (slash) {
-        *slash = L'\0';
-        wcscat(dllPath, L"\\sqlite3.dll");
-        ctx->hDll = LoadLibraryW(dllPath);
-        if (!ctx->hDll) {
-            wcscpy(dllPath, L"");
-            GetModuleFileNameW(NULL, dllPath, MAX_PATH);
-            slash = wcsrchr(dllPath, L'\\');
-            if (slash) {
-                *slash = L'\0';
-                wcscat(dllPath, L"\\sql3\\sqlite3.dll");
-                ctx->hDll = LoadLibraryW(dllPath);
-            }
-        }
-    }
-
-    if (!ctx->hDll) {
-        DWORD error = GetLastError();
-        wsprintfW(debugMsg, L"无法加载sqlite3.dll! 错误代码: %lu\n请确保sqlite3.dll在程序目录或sql3子目录中。", error);
-        ShowError(debugMsg);
-        return DB_ERROR_OPEN;
-    }
-
-load_functions:
-    // 加载所有函数指针
-    sqlite3_open       = (sqlite3_open_ptr)GetProcAddress(ctx->hDll, "sqlite3_open");
-    sqlite3_open16     = (sqlite3_open16_ptr)GetProcAddress(ctx->hDll, "sqlite3_open16");
-    sqlite3_close      = (sqlite3_close_ptr)GetProcAddress(ctx->hDll, "sqlite3_close");
-    sqlite3_exec       = (sqlite3_exec_ptr)GetProcAddress(ctx->hDll, "sqlite3_exec");
-    sqlite3_prepare_v2 = (sqlite3_prepare_v2_ptr)GetProcAddress(ctx->hDll, "sqlite3_prepare_v2");
-    sqlite3_step       = (sqlite3_step_ptr)GetProcAddress(ctx->hDll, "sqlite3_step");
-    sqlite3_finalize   = (sqlite3_finalize_ptr)GetProcAddress(ctx->hDll, "sqlite3_finalize");
-    sqlite3_column_text= (sqlite3_column_text_ptr)GetProcAddress(ctx->hDll, "sqlite3_column_text");
-    sqlite3_bind_text  = (sqlite3_bind_text_ptr)GetProcAddress(ctx->hDll, "sqlite3_bind_text");
-    sqlite3_last_insert_rowid = (sqlite3_last_insert_rowid_ptr)GetProcAddress(ctx->hDll, "sqlite3_last_insert_rowid");
-    sqlite3_free_ptr   = (void(*)(void*))GetProcAddress(ctx->hDll, "sqlite3_free");
-    sqlite3_reset_ptr  = (int(*)(sqlite3_stmt*))GetProcAddress(ctx->hDll, "sqlite3_reset");
-
-    // 检查必需的函数是否都加载了
-    if (!sqlite3_open || !sqlite3_close || !sqlite3_exec || !sqlite3_prepare_v2 ||
-        !sqlite3_step || !sqlite3_finalize || !sqlite3_column_text || !sqlite3_bind_text) {
-        wchar_t missing[256] = L"缺少以下SQLite函数: ";
-        if (!sqlite3_open) wcscat(missing, L"sqlite3_open ");
-        if (!sqlite3_close) wcscat(missing, L"sqlite3_close ");
-        if (!sqlite3_exec) wcscat(missing, L"sqlite3_exec ");
-        if (!sqlite3_prepare_v2) wcscat(missing, L"sqlite3_prepare_v2 ");
-        if (!sqlite3_step) wcscat(missing, L"sqlite3_step ");
-        if (!sqlite3_finalize) wcscat(missing, L"sqlite3_finalize ");
-        if (!sqlite3_column_text) wcscat(missing, L"sqlite3_column_text ");
-        if (!sqlite3_bind_text) wcscat(missing, L"sqlite3_bind_text ");
-
-        ShowError(missing);
-        FreeLibrary(ctx->hDll);
-        ctx->hDll = NULL;
-        return DB_ERROR_OPEN;
-    }
-
-    OutputDebugStringW(L"所有SQLite函数加载成功!");
-    return DB_OK;
 }
 
 int Db_Init(DbContext *ctx, const wchar_t *dbPath)
@@ -124,12 +21,7 @@ int Db_Init(DbContext *ctx, const wchar_t *dbPath)
     wsprintfW(debugMsg, L"初始化数据库，路径: %s", dbPath);
     OutputDebugStringW(debugMsg);
 
-    // 加载SQLite DLL
-    int result = LoadSQLiteDLL(ctx);
-    if (result != DB_OK) {
-        OutputDebugStringW(L"加载SQLite DLL失败!");
-        return result;
-    }
+    int result;
 
     // 打开或创建数据库
     char utf8Path[MAX_PATH * 3];
@@ -164,7 +56,7 @@ int Db_Init(DbContext *ctx, const wchar_t *dbPath)
     if (result != 0) {
         wsprintfW(debugMsg, L"创建表失败! 错误: %S", errMsg ? errMsg : "未知错误");
         ShowError(debugMsg);
-        if (sqlite3_free_ptr && errMsg) sqlite3_free_ptr(errMsg);
+        if (errMsg) sqlite3_free(errMsg);
         sqlite3_close(ctx->db);
         ctx->db = NULL;
         return DB_ERROR_CREATE;
@@ -177,7 +69,7 @@ int Db_Init(DbContext *ctx, const wchar_t *dbPath)
     result = sqlite3_exec(ctx->db, createIndex, NULL, NULL, &errMsg);
     if (result != 0) {
         OutputDebugStringW(L"创建索引失败 (但表已成功创建)");
-        if (sqlite3_free_ptr && errMsg) sqlite3_free_ptr(errMsg);
+        if (errMsg) sqlite3_free(errMsg);
     }
 
     OutputDebugStringW(L"数据库初始化完成!");
@@ -191,10 +83,6 @@ int Db_Close(DbContext *ctx)
         sqlite3_close(ctx->db);
         ctx->db = NULL;
     }
-    if (ctx->hDll) {
-        FreeLibrary(ctx->hDll);
-        ctx->hDll = NULL;
-    }
     memset(ctx->dbPath, 0, sizeof(ctx->dbPath));
     OutputDebugStringW(L"数据库已关闭");
     return DB_OK;
@@ -202,7 +90,7 @@ int Db_Close(DbContext *ctx)
 
 int Db_Insert(DbContext *ctx, const wchar_t *question, const wchar_t *answer)
 {
-    if (!ctx->db || !ctx->hDll) {
+    if (!ctx->db) {
         OutputDebugStringW(L"数据库未初始化!");
         return DB_ERROR_OPEN;
     }
@@ -243,7 +131,7 @@ int Db_Insert(DbContext *ctx, const wchar_t *question, const wchar_t *answer)
 
 wchar_t* Db_Search(DbContext *ctx, const wchar_t *question)
 {
-    if (!ctx->db || !ctx->hDll) {
+    if (!ctx->db) {
         OutputDebugStringW(L"数据库未初始化!");
         return NULL;
     }
@@ -300,7 +188,7 @@ wchar_t* Db_SearchFuzzy(DbContext *ctx, const wchar_t *question)
     wchar_t *answer = Db_Search(ctx, question);
     if (answer) return answer;
 
-    if (!ctx->db || !ctx->hDll) return NULL;
+    if (!ctx->db) return NULL;
 
     // 获取所有题目
     int count = 0;
@@ -336,7 +224,7 @@ wchar_t* Db_SearchFuzzy(DbContext *ctx, const wchar_t *question)
 
 int Db_Delete(DbContext *ctx, const wchar_t *question)
 {
-    if (!ctx->db || !ctx->hDll) {
+    if (!ctx->db) {
         return DB_ERROR_OPEN;
     }
 
@@ -367,7 +255,7 @@ int Db_Delete(DbContext *ctx, const wchar_t *question)
 
 struct QAPair* Db_GetAllPairs(DbContext *ctx, int *count)
 {
-    if (!ctx->db || !ctx->hDll) {
+    if (!ctx->db) {
         return NULL;
     }
 
@@ -436,7 +324,7 @@ void Db_FreeResults(struct QAPair *pairs, int count)
 
 int Db_ImportFromText(DbContext *ctx, const wchar_t *text)
 {
-    if (!ctx->db || !ctx->hDll) {
+    if (!ctx->db) {
         return DB_ERROR_OPEN;
     }
 
@@ -500,7 +388,7 @@ int Db_ImportFromText(DbContext *ctx, const wchar_t *text)
 
 wchar_t* Db_ExportToText(DbContext *ctx)
 {
-    if (!ctx->db || !ctx->hDll) {
+    if (!ctx->db) {
         return NULL;
     }
 
@@ -538,5 +426,5 @@ wchar_t* Db_ExportToText(DbContext *ctx)
 
 BOOL Db_IsInitialized(DbContext *ctx)
 {
-    return (ctx->hDll != NULL && ctx->db != NULL);
+    return (ctx->db != NULL);
 }

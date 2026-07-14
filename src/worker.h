@@ -6,6 +6,7 @@ typedef struct {
     wchar_t        *text;           // 文本缓冲区（工作线程拥有并释放）
     int             textLen;        // 字符数（不含终止符）
     int             delayMs;        // 每字符间隔（毫秒）
+    BOOL            codeInputMode;  // Python 补偿 + 忽略换行后的原文缩进
     HWND            hwndMain;       // 主窗口句柄，用于 PostMessage 回调
 
     HANDLE          hEventPause;    // 手动重置事件：signaled=运行, non-signaled=暂停

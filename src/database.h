@@ -1,17 +1,6 @@
 #pragma once
 #include <windows.h>
-
-// SQLite类型定义（简化版本，因为我们使用动态加载）
-typedef struct sqlite3 sqlite3;
-typedef struct sqlite3_stmt sqlite3_stmt;
-typedef int (*sqlite3_callback)(void*, int, char**, char**);
-typedef long long sqlite3_int64;
-
-#define SQLITE_OK               0
-#define SQLITE_ERROR            1
-#define SQLITE_ROW              100
-#define SQLITE_DONE             101
-#define SQLITE_TRANSIENT        ((void(*)(void*))-1)
+#include "sqlite3.h"
 
 // ── 错误代码 ────────────────────────────────────────────────
 #define DB_OK               0
@@ -24,22 +13,9 @@ typedef long long sqlite3_int64;
 
 // ── 数据库操作上下文 ───────────────────────────────────────
 typedef struct {
-    HMODULE     hDll;
     sqlite3    *db;
     wchar_t     dbPath[MAX_PATH];
 } DbContext;
-
-// ── 函数指针类型定义 ───────────────────────────────────────
-typedef int (*sqlite3_open_ptr)(const char *filename, sqlite3 **ppDb);
-typedef int (*sqlite3_open16_ptr)(const void *filename, sqlite3 **ppDb);
-typedef int (*sqlite3_close_ptr)(sqlite3 *db);
-typedef int (*sqlite3_exec_ptr)(sqlite3*, const char *sql, sqlite3_callback, void *, char **errmsg);
-typedef int (*sqlite3_prepare_v2_ptr)(sqlite3 *db, const char *zSql, int nByte, sqlite3_stmt **ppStmt, const char **pzTail);
-typedef int (*sqlite3_step_ptr)(sqlite3_stmt*);
-typedef int (*sqlite3_finalize_ptr)(sqlite3_stmt*);
-typedef const unsigned char* (*sqlite3_column_text_ptr)(sqlite3_stmt*, int iCol);
-typedef int (*sqlite3_bind_text_ptr)(sqlite3_stmt*, int, const char*, int n, void(*)(void*));
-typedef sqlite3_int64 (*sqlite3_last_insert_rowid_ptr)(sqlite3*);
 
 // ── 导出函数声明 ───────────────────────────────────────────
 
@@ -81,7 +57,7 @@ int Db_ImportFromText(DbContext *ctx, const wchar_t *text);
 // 将所有记录导出到文本（格式：题目:题目内容 答案:答案内容）
 wchar_t* Db_ExportToText(DbContext *ctx);
 
-// 检查SQLite DLL是否已加载
+// 检查数据库是否已初始化
 BOOL Db_IsInitialized(DbContext *ctx);
 
 #ifdef __cplusplus

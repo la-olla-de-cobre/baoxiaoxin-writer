@@ -128,15 +128,15 @@ void UI_Create(HWND hwndParent, AppUI *ui)
     InitCommonControlsEx(&icc);
 
     ui->hwndMain  = hwndParent;
-    ui->darkMode  = TRUE;  // 默认暗色
+    ui->darkMode  = FALSE; // 默认浅色
     ui->btnCount  = 0;
     ui->hFontUI   = CreateUIFont(10, FALSE);
     ui->hFontEdit = CreateUIFont(11, FALSE);
 
     // 缓存画刷
-    ui->hbrBg    = CreateSolidBrush(CLR_BG_DARK);
-    ui->hbrPanel = CreateSolidBrush(CLR_PANEL_DARK);
-    ui->hbrEdit  = CreateSolidBrush(CLR_EDIT_DARK);
+    ui->hbrBg    = CreateSolidBrush(CLR_BG_LIGHT);
+    ui->hbrPanel = CreateSolidBrush(CLR_PANEL_LIGHT);
+    ui->hbrEdit  = CreateSolidBrush(CLR_PANEL_LIGHT);
 
     // 多行文本框
     ui->hwndEditText = CreateWindowExW(
@@ -186,7 +186,7 @@ void UI_Create(HWND hwndParent, AppUI *ui)
         WS_CHILD | WS_VISIBLE | PBS_SMOOTH,
         0, 0, 0, 0, hwndParent, (HMENU)IDC_PROGRESS, NULL, NULL);
     SendMessageW(ui->hwndProgress, PBM_SETBARCOLOR, 0, CLR_ACCENT);
-    SendMessageW(ui->hwndProgress, PBM_SETBKCOLOR, 0, CLR_PANEL_DARK);
+    SendMessageW(ui->hwndProgress, PBM_SETBKCOLOR, 0, CLR_PANEL_LIGHT);
 
     // 字符计数 + 状态栏
     ui->hwndStaticChars = MakeStatic(hwndParent, L"0 / 0 字符", IDC_STATIC_CHARS, ui->hFontUI);
@@ -207,6 +207,12 @@ void UI_Create(HWND hwndParent, AppUI *ui)
         WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
         0, 0, 0, 0, hwndParent, (HMENU)IDC_CHK_USE_PANEL, NULL, NULL);
     SendMessageW(ui->hwndChkUsePanel, WM_SETFONT, (WPARAM)ui->hFontUI, TRUE);
+
+    ui->hwndChkCodeMode = CreateWindowExW(0, L"BUTTON",
+        L"在线网站 Python 补偿（含行首缩进过滤）",
+        WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+        0, 0, 0, 0, hwndParent, (HMENU)IDC_CHK_CODE_MODE, NULL, NULL);
+    SendMessageW(ui->hwndChkCodeMode, WM_SETFONT, (WPARAM)ui->hFontUI, TRUE);
 
     // 使用提示
     ui->hwndStaticHint = MakeStatic(hwndParent,
@@ -255,7 +261,10 @@ void UI_Layout(AppUI *ui, int cx, int cy)
     y += 30 + pad;
 
     SetWindowPos(ui->hwndChkUsePanel, NULL, panelX, y, panelW, 24, SWP_NOZORDER);
-    y += 24 + pad * 2;
+    y += 24 + pad;
+
+    SetWindowPos(ui->hwndChkCodeMode, NULL, panelX, y, panelW, 24, SWP_NOZORDER);
+    y += 24 + pad;
 
     SetWindowPos(ui->hwndStaticHint, NULL, panelX, y, panelW, 70, SWP_NOZORDER);
     y += 70 + pad * 2;
@@ -287,6 +296,7 @@ void UI_SetState(AppUI *ui, int state)
     EnableWindow(ui->hwndEditInterval, state == STATE_IDLE);
     EnableWindow(ui->hwndComboPreset,  state == STATE_IDLE);
     EnableWindow(ui->hwndChkUsePanel,  state == STATE_IDLE);
+    EnableWindow(ui->hwndChkCodeMode, state == STATE_IDLE);
 
     // 强制重绘按钮（状态切换后颜色更新）
     for (int i = 0; i < ui->btnCount; i++)
@@ -354,32 +364,35 @@ LRESULT UI_OnDrawItem(AppUI *ui, WPARAM wParam, LPARAM lParam)
 
     // 确定底色
     COLORREF clrFill;
-    COLORREF clrText = enabled ? CLR_TEXT_DARK : CLR_TEXT_DIM;
+    COLORREF clrText = enabled ? CLR_TEXT_LIGHT : RGB(140, 142, 150);
 
     switch (ui->btnRoles[i]) {
     case BTN_ROLE_ACCENT:
+        clrText = RGB(255, 255, 255);
         clrFill = pressed ? CLR_ACCENT_PRESS
                 : hover   ? CLR_ACCENT_HOVER
                 :           CLR_ACCENT;
         break;
     case BTN_ROLE_WARN:
+        clrText = RGB(255, 255, 255);
         clrFill = pressed ? RGB(160, 100, 10)
                 : hover   ? RGB(220, 160, 50)
                 :           CLR_BTN_WARN;
         break;
     case BTN_ROLE_DANGER:
+        clrText = RGB(255, 255, 255);
         clrFill = pressed ? RGB(170, 30, 30)
                 : hover   ? RGB(240, 80, 80)
                 :           CLR_BTN_DANGER;
         break;
     default: // NEUTRAL
-        clrFill = pressed ? RGB(35, 36, 50)
-                : hover   ? CLR_BTN_NEUTRAL_H
-                :           CLR_BTN_NEUTRAL;
+        clrFill = pressed ? RGB(190, 194, 205)
+                : hover   ? RGB(220, 224, 234)
+                :           RGB(235, 237, 243);
         break;
     }
 
-    if (!enabled) clrFill = RGB(40, 41, 55);
+    if (!enabled) clrFill = RGB(225, 227, 232);
 
     HDC  hdc  = dis->hDC;
     RECT rc   = dis->rcItem;
@@ -415,14 +428,14 @@ LRESULT UI_OnCtlColor(AppUI *ui, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
     HWND  hwndCtl = (HWND)lParam;
 
     if (hwndCtl == ui->hwndEditText || hwndCtl == ui->hwndEditInterval) {
-        SetTextColor(hdc, CLR_TEXT_DARK);
-        SetBkColor(hdc, CLR_EDIT_DARK);
+        SetTextColor(hdc, CLR_TEXT_LIGHT);
+        SetBkColor(hdc, CLR_PANEL_LIGHT);
         return (LRESULT)ui->hbrEdit;
     }
 
     // 所有 STATIC 标签
-    SetTextColor(hdc, CLR_TEXT_DIM);
-    SetBkColor(hdc, CLR_BG_DARK);
+    SetTextColor(hdc, RGB(70, 72, 82));
+    SetBkColor(hdc, CLR_BG_LIGHT);
     return (LRESULT)ui->hbrBg;
 }
 
