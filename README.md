@@ -1,106 +1,142 @@
-# BaoXiaoXin Writer (鲍小新写字)
+# BaoXiaoXin Writer
 
-> A tiny Win32 desktop tool that simulates keyboard input character-by-character — bypasses "paste disabled" restrictions everywhere. Full Unicode / Chinese support.
+轻量、原生 Windows 的剪贴板键盘输入工具，专为代码编辑器和不方便直接粘贴的输入场景设计。
 
----
+![BaoXiaoXin Writer hero](assets/hero.png)
 
-## Features
+BaoXiaoXin Writer 从剪贴板或文本面板读取内容，通过 Windows `SendInput` 逐字符发送到当前焦点窗口。它支持完整 Unicode 输入、可调速输入、全局热键、题库搜索，以及面向 Python 在线代码编辑器的自动缩进补偿。
 
-- **Simulate typing** — `SendInput + KEYEVENTF_UNICODE`, works in any app, full Unicode
-- **Load from file** — `.txt` / `.md` / `.csv`, auto-detects UTF-8 / UTF-16 / UTF-16BE
-- **Adjustable speed** — Slow (300ms) / Medium (80ms) / Fast (20ms) presets, or 10~500ms manual
-- **Global hotkeys** — `Ctrl+Alt+V` start typing, `Ctrl+Alt+B` search answer, `Ctrl+Alt+S` stop
-- **QA database** — Built-in SQLite-powered Q&A manager, fuzzy search supported
-- **Fuzzy search** — Case-insensitive substring matching (toggle on/off in GUI)
-- **Tray mode** — Minimizes to system tray; hotkeys work globally in background
-- **Non-blocking** — Typing runs in a worker thread, UI stays responsive
+> 项目定位是本地输入辅助和开发工具。请遵守目标网站的使用规则、考试规定和服务条款。
 
-## Screenshots
+## 主要功能
 
-![Main UI](screenshot1.png)
+- **剪贴板键盘输入**：将文本逐字符输入到当前焦点窗口，支持中英文和 Unicode。
+- **Python 在线编辑器模式**：忽略原文行首空格，交给网站编辑器自动缩进，并对 `if/else` 等代码块做回退补偿。
+- **可调输入速度**：支持慢速、中速、快速预设，也可以手动设置 10～500ms 字符间隔。
+- **文件加载**：从文本文件加载待输入内容。
+- **全局热键**：窗口隐藏到托盘后仍可启动、搜索和停止输入。
+- **内置题库**：使用静态编译的 SQLite，支持题目与答案管理、模糊搜索，不需要额外的 `sqlite3.dll`。
+- **浅色界面**：默认使用浅灰/白色背景，适合长时间使用。
+- **响应式输入线程**：输入任务运行在独立 worker 线程中，主界面保持响应。
 
-![QA Database](screenshot2.png)
+## 工作流程
 
----
+![Clipboard to editor workflow](assets/workflow.png)
 
-## Quick Start (Noob-Friendly)
+程序不会把代码原有的行首空格再次机械地叠加到网站自动缩进上。开启 Python 模式后，原始缩进只用于分析目标层级，实际的换行和基础缩进交给目标编辑器处理。
 
-### Step 1 — Download
+## 快速开始
 
-Go to the [Releases](../../releases) page and download **both files** from the latest release:
+### 直接运行
 
-| File | Why |
-|------|-----|
-| `KeyboardSim.exe` | The app itself |
-| `sqlite3.dll` | Required for the QA database feature |
+从 Releases 下载 `KeyboardSim.exe`，双击运行即可，无需安装 Python 或 SQLite DLL。
 
-> **Put both files in the SAME folder.** If `sqlite3.dll` is missing, the database button won't work (typing still works fine).
+1. 复制要输入的文本。
+2. 将光标放到目标输入框。
+3. 按 `Ctrl+Alt+V` 开始输入。
+4. 按 `Ctrl+Alt+S` 立即停止。
 
-Double-click `KeyboardSim.exe` to run. No installer needed.
+程序可以缩到系统托盘运行。需要修改速度、输入模式或题库时，右键托盘图标打开主窗口。
 
-### Step 2 — Type something (the easy way)
+### Python 在线编辑器模式
 
-1. **Copy** any text to clipboard (Ctrl+C)
-2. Press **`Ctrl+Alt+V`** — the app starts typing it into wherever your cursor is
-3. To stop, press **`Ctrl+Alt+S`**
+在主面板勾选：
 
-That's it. You don't even need to open the window.
-
-### Step 3 — Open the window (if you want)
-
-Right-click the tray icon → "打开主窗口". The window lets you:
-
-- **From file**: load a `.txt` file into the text box
-- **Speed**: adjust typing speed (slower = fewer rate-limit issues)
-- **"从面板读取"** checkbox: check it → `Ctrl+Alt+V` reads from the text box instead of clipboard
-- **QA Database**: search & manage Q&A pairs
-- **Fuzzy search**: toggle on for inexact matching
-
-### Step 4 — QA Database (clipboard search)
-
-1. Copy a question to clipboard (Ctrl+C)
-2. Press **`Ctrl+Alt+B`** — the app searches the database
-3. **Window visible** → answer pasted into the text box
-4. **Window hidden** → answer copied directly to your clipboard, ready to paste
-
----
-
-## Hotkeys Summary
-
-| Hotkey | Action |
-|--------|--------|
-| `Ctrl+Alt+V` | Start typing (clipboard or text box, depending on checkbox) |
-| `Ctrl+Alt+B` | Search clipboard question in database |
-| `Ctrl+Alt+S` | Stop typing immediately |
-
-> **Admin rights**: Some programs (e.g. UAC prompts) require running this tool as administrator for SendInput to work.
-
----
-
-## Build from Source
-
-**Requires**: MinGW (gcc 6.3+)
-
-```bat
-git clone https://github.com/shenyuhao1/baoxiaoxin-writer.git
-cd baoxiaoxin-writer
-gcc -mwindows -O2 -s -o KeyboardSim.exe src/main.c src/ui.c src/worker.c src/database.c src/qa_ui.c src/config.c -lcomctl32 -luxtheme -lcomdlg32 -lgdi32 -lshell32
+```text
+在线网站 Python 补偿（含行首缩进过滤）
 ```
 
-Output: `KeyboardSim.exe` (~58 KB). Requires `sqlite3.dll` at runtime for database features.
+这个模式适合目标网站已经会自动缩进的 Python 编辑器。它会：
 
-## Tech Stack
+- 忽略剪贴板中每行开头的空格和 Tab；
+- 根据 Python 的 `def`、`if`、`else`、`for`、`while`、`try` 等代码块判断层级；
+- 对网站多出来的缩进发送对应次数的 Backspace；
+- 跳过只包含空格的空白行，避免空白行重复触发补偿；
+- 保留注释内容，不把注释当作代码块结束标志。
 
-| Module | Implementation |
-|--------|---------------|
-| GUI | Win32 API + ComCtl32 v6 |
-| Keyboard simulation | `SendInput` + `KEYEVENTF_UNICODE` |
-| Unicode | Direct `wchar_t` injection, no IME |
-| Threading | `_beginthreadex` + `CRITICAL_SECTION` + Event |
-| Config | INI file (`%APPDATA%\KeyboardSim\config.ini`) |
-| Database | SQLite (dynamic loading via `LoadLibrary`) |
-| Build | MinGW gcc, pure C, zero third-party libs |
+不同网站的编辑器实现可能不同。建议先使用短代码样例验证，再输入较长程序。
 
-## License
+## 全局热键
 
-MIT
+| 热键 | 功能 |
+| --- | --- |
+| `Ctrl+Alt+V` | 开始输入剪贴板或面板内容 |
+| `Ctrl+Alt+B` | 用剪贴板中的题目搜索内置题库 |
+| `Ctrl+Alt+S` | 停止当前输入 |
+
+## 题库功能
+
+复制题目后按 `Ctrl+Alt+B`：
+
+- 主窗口可见时，匹配到的答案会写入文本面板；
+- 主窗口隐藏时，匹配到的答案会直接写入剪贴板；
+- 可在数据库管理窗口中添加、导入、删除题目和答案；
+- 支持模糊搜索。
+
+SQLite 已经静态编译进程序，运行时不依赖外部 `sqlite3.dll`。
+
+## 从源码构建
+
+### 环境
+
+- Windows
+- MinGW GCC
+- GNU Make
+
+### 构建
+
+```bat
+git clone https://github.com/la-olla-de-cobre/baoxiaoxin-writer.git
+cd baoxiaoxin-writer
+mingw32-make TARGET=KeyboardSim.exe
+```
+
+输出文件为：
+
+```text
+KeyboardSim.exe
+```
+
+也可以使用：
+
+```bat
+build.bat
+```
+
+GitHub Actions 会在 Windows runner 上使用 MSYS2/MinGW 自动执行构建检查。
+
+## 项目结构
+
+```text
+src/
+├─ main.c        窗口、热键和应用生命周期
+├─ ui.c          Win32 界面与浅色主题
+├─ worker.c      键盘输入、缩进补偿和 worker 线程
+├─ database.c    SQLite 数据库封装
+├─ qa_ui.c       题库管理界面
+└─ config.c      配置加载与保存
+third_party/
+└─ sqlite/       SQLite amalgamation
+res/              Windows 资源与 manifest
+assets/           README 项目图片
+```
+
+## 技术栈
+
+| 模块 | 实现 |
+| --- | --- |
+| GUI | Win32 API、Common Controls |
+| 键盘输入 | `SendInput`、`KEYEVENTF_UNICODE` |
+| Unicode | Windows wide-character API |
+| 线程 | `_beginthreadex`、Windows Events |
+| 数据库 | 静态 SQLite amalgamation |
+| 构建 | MinGW GCC、GNU Make |
+| 自动检查 | GitHub Actions + MSYS2 |
+
+## 配置
+
+用户配置由程序运行时保存，包含输入速度、窗口置顶、Python 输入模式和最近使用路径等设置。配置不会写入可执行文件本身。
+
+## 许可证
+
+MIT License
