@@ -3,8 +3,12 @@ name: Windows build
 on:
   push:
     branches: [ "main" ]
+    tags: [ "v*" ]
   pull_request:
     branches: [ "main" ]
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -25,3 +29,16 @@ jobs:
     - name: Build
       shell: msys2 {0}
       run: make TARGET=KeyboardSim.exe
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: KeyboardSim-${{ github.ref_name }}
+        path: KeyboardSim.exe
+        if-no-files-found: error
+    - name: Publish GitHub Release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+        name: BaoXiaoXin Writer ${{ github.ref_name }}
+        generate_release_notes: true
+        files: KeyboardSim.exe
