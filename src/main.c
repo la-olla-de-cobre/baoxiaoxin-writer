@@ -6,6 +6,7 @@
 #include <commdlg.h>
 #include <commctrl.h>
 #include <shlobj.h>
+#include <shellapi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <wchar.h>
