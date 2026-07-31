@@ -256,7 +256,12 @@ static BOOL LoadTextFile(const wchar_t *path)
     if (!raw) { CloseHandle(hFile); return FALSE; }
 
     DWORD bytesRead = 0;
-    ReadFile(hFile, raw, fileSize, &bytesRead, NULL);
+    if (!ReadFile(hFile, raw, fileSize, &bytesRead, NULL) || bytesRead != fileSize) {
+        CloseHandle(hFile);
+        HeapFree(GetProcessHeap(), 0, raw);
+        MessageBoxW(g_ui.hwndMain, L"读取文件失败。", L"错误", MB_ICONERROR);
+        return FALSE;
+    }
     CloseHandle(hFile);
     raw[bytesRead] = raw[bytesRead+1] = raw[bytesRead+2] = 0;
 
@@ -570,6 +575,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 {
     (void)hPrevInstance;
     (void)lpCmdLine;
+    (void)nCmdShow;
 
     // 构建 INI 路径：%APPDATA%\KeyboardSim\config.ini
     wchar_t appData[MAX_PATH];

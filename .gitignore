@@ -3,6 +3,7 @@ KeyboardSim.exe
 *.exe
 *.o
 *.obj
+*.d
 res/app.res
 
 # 配置文件（包含用户隐私）
@@ -28,6 +29,11 @@ src/sqlite3.h
 .vscode/
 *.swp
 *~
+.claude/
+.occai/
+
+# 本地测试录屏
+*.[mM][pP]4
 
 # 需求文档（可选，看你是否想公开）
 *.md

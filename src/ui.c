@@ -26,8 +26,12 @@ static void ApplyDarkMode(HWND hwnd, BOOL dark)
 
 static HFONT CreateUIFont(int ptSize, BOOL bold)
 {
+    HDC hdc = GetDC(NULL);
+    int dpiY = hdc ? GetDeviceCaps(hdc, LOGPIXELSY) : 96;
+    if (hdc) ReleaseDC(NULL, hdc);
+
     return CreateFontW(
-        -MulDiv(ptSize, GetDeviceCaps(GetDC(NULL), LOGPIXELSY), 72),
+        -MulDiv(ptSize, dpiY, 72),
         0, 0, 0,
         bold ? FW_SEMIBOLD : FW_NORMAL,
         FALSE, FALSE, FALSE,

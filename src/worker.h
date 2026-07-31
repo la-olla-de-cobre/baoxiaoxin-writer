@@ -1,9 +1,9 @@
 #pragma once
 #include <windows.h>
 
-// 传递给工作线程的参数（堆分配，线程结束后由线程自身释放）
+// 传递给工作线程的参数（由调用方在线程结束后释放）
 typedef struct {
-    wchar_t        *text;           // 文本缓冲区（工作线程拥有并释放）
+    wchar_t        *text;           // 文本缓冲区（由调用方释放）
     int             textLen;        // 字符数（不含终止符）
     int             delayMs;        // 每字符间隔（毫秒）
     BOOL            codeInputMode;  // Python 补偿 + 忽略换行后的原文缩进
@@ -14,7 +14,8 @@ typedef struct {
     volatile LONG   stopped;        // 原子标志，1=已请求停止
 } WorkerParams;
 
-// 启动工作线程，返回线程句柄（调用方负责 CloseHandle）
+// 启动工作线程，返回线程句柄（调用方负责 CloseHandle 和 Worker_Free）。
+// 失败时只回收本函数创建的事件，参数对象仍归调用方所有。
 HANDLE Worker_Start(WorkerParams *params);
 
 // 暂停输入（线程阻塞直到 Resume）

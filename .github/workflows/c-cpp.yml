@@ -8,7 +8,7 @@ on:
     branches: [ "main" ]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -16,9 +16,9 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
     - name: Install MinGW toolchain
-      uses: msys2/setup-msys2@v2
+      uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
       with:
         msystem: MINGW32
         update: true
@@ -29,16 +29,32 @@ jobs:
     - name: Build
       shell: msys2 {0}
       run: make TARGET=KeyboardSim.exe
+    - name: Test
+      shell: msys2 {0}
+      run: make test
     - name: Upload build artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
         name: KeyboardSim-${{ github.ref_name }}
         path: KeyboardSim.exe
         if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Download build artifact
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      with:
+        name: KeyboardSim-${{ github.ref_name }}
+        path: release
     - name: Publish GitHub Release
-      if: startsWith(github.ref, 'refs/tags/v')
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
       with:
         name: BaoXiaoXin Writer ${{ github.ref_name }}
         generate_release_notes: true
-        files: KeyboardSim.exe
+        files: release/KeyboardSim.exe

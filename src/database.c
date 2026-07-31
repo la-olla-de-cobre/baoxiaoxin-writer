@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <wchar.h>
 #include <string.h>
+#include <limits.h>
 #include "database.h"
 
 // 辅助函数：显示错误消息
@@ -12,8 +13,58 @@ static void ShowError(const wchar_t *msg)
     MessageBoxW(NULL, msg, L"数据库错误", MB_ICONERROR);
 }
 
+static char *WideToUtf8(const wchar_t *text)
+{
+    int size;
+    char *utf8;
+
+    if (!text) return NULL;
+    size = WideCharToMultiByte(CP_UTF8, 0, text, -1, NULL, 0, NULL, NULL);
+    if (size <= 0) return NULL;
+
+    utf8 = (char *)malloc((size_t)size);
+    if (!utf8) return NULL;
+    if (WideCharToMultiByte(CP_UTF8, 0, text, -1, utf8, size, NULL, NULL) <= 0) {
+        free(utf8);
+        return NULL;
+    }
+    return utf8;
+}
+
+static wchar_t *Utf8ToWide(const char *text)
+{
+    int size;
+    wchar_t *wide;
+
+    if (!text) return NULL;
+    size = MultiByteToWideChar(CP_UTF8, 0, text, -1, NULL, 0);
+    if (size <= 0) return NULL;
+
+    wide = (wchar_t *)malloc((size_t)size * sizeof(wchar_t));
+    if (!wide) return NULL;
+    if (MultiByteToWideChar(CP_UTF8, 0, text, -1, wide, size) <= 0) {
+        free(wide);
+        return NULL;
+    }
+    return wide;
+}
+
+static wchar_t *DuplicateLower(const wchar_t *text)
+{
+    wchar_t *copy = _wcsdup(text);
+    if (copy) _wcslwr(copy);
+    return copy;
+}
+
 int Db_Init(DbContext *ctx, const wchar_t *dbPath)
 {
+    if (!ctx || !dbPath) {
+        return DB_ERROR_OPEN;
+    }
+    if (wcslen(dbPath) >= MAX_PATH) {
+        return DB_ERROR_OPEN;
+    }
+
     memset(ctx, 0, sizeof(DbContext));
     wcscpy(ctx->dbPath, dbPath);
 
@@ -35,6 +86,10 @@ int Db_Init(DbContext *ctx, const wchar_t *dbPath)
     if (result != 0) {
         wsprintfW(debugMsg, L"无法打开数据库! SQLite错误: %d", result);
         ShowError(debugMsg);
+        if (ctx->db) {
+            sqlite3_close(ctx->db);
+            ctx->db = NULL;
+        }
         return DB_ERROR_OPEN;
     }
 
@@ -95,12 +150,12 @@ int Db_Insert(DbContext *ctx, const wchar_t *question, const wchar_t *answer)
         return DB_ERROR_OPEN;
     }
 
-    // 转换为UTF-8
-    char utf8Question[4096], utf8Answer[4096];
-    int qLen = WideCharToMultiByte(CP_UTF8, 0, question, -1, utf8Question, 4096, NULL, NULL);
-    int aLen = WideCharToMultiByte(CP_UTF8, 0, answer, -1, utf8Answer, 4096, NULL, NULL);
+    char *utf8Question = WideToUtf8(question);
+    char *utf8Answer = WideToUtf8(answer);
 
-    if (qLen <= 0 || aLen <= 0) {
+    if (!utf8Question || !utf8Answer) {
+        free(utf8Question);
+        free(utf8Answer);
         OutputDebugStringW(L"文本转换失败!");
         return DB_ERROR_MEMORY;
     }
@@ -110,15 +165,19 @@ int Db_Insert(DbContext *ctx, const wchar_t *question, const wchar_t *answer)
     sqlite3_stmt *stmt;
     int result = sqlite3_prepare_v2(ctx->db, sql, -1, &stmt, NULL);
     if (result != 0) {
+        free(utf8Question);
+        free(utf8Answer);
         OutputDebugStringW(L"SQL准备失败!");
         return DB_ERROR_EXEC;
     }
 
-    sqlite3_bind_text(stmt, 1, utf8Question, qLen - 1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 2, utf8Answer, aLen - 1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 1, utf8Question, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, utf8Answer, -1, SQLITE_TRANSIENT);
 
     result = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
+    free(utf8Question);
+    free(utf8Answer);
 
     if (result != SQLITE_DONE) {
         OutputDebugStringW(L"SQL执行失败!");
@@ -136,9 +195,8 @@ wchar_t* Db_Search(DbContext *ctx, const wchar_t *question)
         return NULL;
     }
 
-    char utf8Question[4096];
-    int qLen = WideCharToMultiByte(CP_UTF8, 0, question, -1, utf8Question, 4096, NULL, NULL);
-    if (qLen <= 0) {
+    char *utf8Question = WideToUtf8(question);
+    if (!utf8Question) {
         OutputDebugStringW(L"文本转换失败!");
         return NULL;
     }
@@ -147,11 +205,13 @@ wchar_t* Db_Search(DbContext *ctx, const wchar_t *question)
     sqlite3_stmt *stmt;
     int result = sqlite3_prepare_v2(ctx->db, sql, -1, &stmt, NULL);
     if (result != 0) {
+        free(utf8Question);
         OutputDebugStringW(L"SQL准备失败!");
         return NULL;
     }
 
-    sqlite3_bind_text(stmt, 1, utf8Question, qLen - 1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 1, utf8Question, -1, SQLITE_TRANSIENT);
+    free(utf8Question);
 
     result = sqlite3_step(stmt);
     if (result != SQLITE_ROW) {
@@ -167,15 +227,13 @@ wchar_t* Db_Search(DbContext *ctx, const wchar_t *question)
         return NULL;
     }
 
-    int aLen = MultiByteToWideChar(CP_UTF8, 0, (const char *)utf8Answer, -1, NULL, 0);
-    wchar_t *answer = (wchar_t *)malloc(aLen * sizeof(wchar_t));
+    wchar_t *answer = Utf8ToWide((const char *)utf8Answer);
     if (!answer) {
         sqlite3_finalize(stmt);
         OutputDebugStringW(L"内存分配失败!");
         return NULL;
     }
 
-    MultiByteToWideChar(CP_UTF8, 0, (const char *)utf8Answer, -1, answer, aLen);
     sqlite3_finalize(stmt);
 
     OutputDebugStringW(L"找到匹配的答案!");
@@ -196,17 +254,18 @@ wchar_t* Db_SearchFuzzy(DbContext *ctx, const wchar_t *question)
     if (!pairs || count == 0) return NULL;
 
     // 将搜索词转为小写
-    wchar_t qLower[4096];
-    wcscpy(qLower, question);
-    _wcslwr(qLower);
+    wchar_t *qLower = DuplicateLower(question);
+    if (!qLower) {
+        Db_FreeResults(pairs, count);
+        return NULL;
+    }
 
     wchar_t *bestAnswer = NULL;
     double bestScore = 0;
 
     for (int i = 0; i < count; i++) {
-        wchar_t stored[4096];
-        wcscpy(stored, pairs[i].question);
-        _wcslwr(stored);
+        wchar_t *stored = DuplicateLower(pairs[i].question);
+        if (!stored) continue;
 
         if (wcsstr(stored, qLower)) {
             double score = (double)wcslen(question) / (double)wcslen(pairs[i].question);
@@ -216,8 +275,10 @@ wchar_t* Db_SearchFuzzy(DbContext *ctx, const wchar_t *question)
                 bestAnswer = _wcsdup(pairs[i].answer);
             }
         }
+        free(stored);
     }
 
+    free(qLower);
     Db_FreeResults(pairs, count);
     return bestAnswer;
 }
@@ -228,9 +289,8 @@ int Db_Delete(DbContext *ctx, const wchar_t *question)
         return DB_ERROR_OPEN;
     }
 
-    char utf8Question[4096];
-    int qLen = WideCharToMultiByte(CP_UTF8, 0, question, -1, utf8Question, 4096, NULL, NULL);
-    if (qLen <= 0) {
+    char *utf8Question = WideToUtf8(question);
+    if (!utf8Question) {
         return DB_ERROR_MEMORY;
     }
 
@@ -238,10 +298,12 @@ int Db_Delete(DbContext *ctx, const wchar_t *question)
     sqlite3_stmt *stmt;
     int result = sqlite3_prepare_v2(ctx->db, sql, -1, &stmt, NULL);
     if (result != 0) {
+        free(utf8Question);
         return DB_ERROR_EXEC;
     }
 
-    sqlite3_bind_text(stmt, 1, utf8Question, qLen - 1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 1, utf8Question, -1, SQLITE_TRANSIENT);
+    free(utf8Question);
 
     result = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
@@ -255,9 +317,11 @@ int Db_Delete(DbContext *ctx, const wchar_t *question)
 
 struct QAPair* Db_GetAllPairs(DbContext *ctx, int *count)
 {
-    if (!ctx->db) {
+    if (!count) {
         return NULL;
     }
+    *count = 0;
+    if (!ctx || !ctx->db) return NULL;
 
     const char *sql = "SELECT question, answer FROM qa_pairs ORDER BY id ASC;";
     sqlite3_stmt *stmt;
@@ -266,48 +330,66 @@ struct QAPair* Db_GetAllPairs(DbContext *ctx, int *count)
         return NULL;
     }
 
-    // 先计算记录数
-    int tmpCount = 0;
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        tmpCount++;
-    }
-    sqlite3_finalize(stmt);
-
-    // 重新准备语句
-    result = sqlite3_prepare_v2(ctx->db, sql, -1, &stmt, NULL);
-    if (result != 0) {
-        return NULL;
-    }
-
-    // 分配内存
-    struct QAPair *pairs = (struct QAPair *)malloc(tmpCount * sizeof(struct QAPair));
+    size_t capacity = 16;
+    int rowCount = 0;
+    struct QAPair *pairs = (struct QAPair *)malloc(capacity * sizeof(struct QAPair));
     if (!pairs) {
         sqlite3_finalize(stmt);
         return NULL;
     }
-    memset(pairs, 0, tmpCount * sizeof(struct QAPair));
 
-    // 读取所有记录
-    int i = 0;
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
+    while ((result = sqlite3_step(stmt)) == SQLITE_ROW) {
+        if (rowCount == INT_MAX) {
+            sqlite3_finalize(stmt);
+            Db_FreeResults(pairs, rowCount);
+            return NULL;
+        }
+        if ((size_t)rowCount == capacity) {
+            if (capacity > (size_t)-1 / 2 / sizeof(struct QAPair)) {
+                sqlite3_finalize(stmt);
+                Db_FreeResults(pairs, rowCount);
+                return NULL;
+            }
+            capacity *= 2;
+            struct QAPair *resized = (struct QAPair *)realloc(
+                pairs, capacity * sizeof(struct QAPair));
+            if (!resized) {
+                sqlite3_finalize(stmt);
+                Db_FreeResults(pairs, rowCount);
+                return NULL;
+            }
+            pairs = resized;
+        }
+
         const unsigned char *utf8Question = sqlite3_column_text(stmt, 0);
         const unsigned char *utf8Answer = sqlite3_column_text(stmt, 1);
+        wchar_t *question = Utf8ToWide((const char *)utf8Question);
+        wchar_t *answer = Utf8ToWide((const char *)utf8Answer);
 
-        int qLen = MultiByteToWideChar(CP_UTF8, 0, (const char *)utf8Question, -1, NULL, 0);
-        int aLen = MultiByteToWideChar(CP_UTF8, 0, (const char *)utf8Answer, -1, NULL, 0);
+        if (!question || !answer) {
+            free(question);
+            free(answer);
+            sqlite3_finalize(stmt);
+            Db_FreeResults(pairs, rowCount);
+            return NULL;
+        }
 
-        pairs[i].question = (wchar_t *)malloc(qLen * sizeof(wchar_t));
-        pairs[i].answer = (wchar_t *)malloc(aLen * sizeof(wchar_t));
-
-        MultiByteToWideChar(CP_UTF8, 0, (const char *)utf8Question, -1, pairs[i].question, qLen);
-        MultiByteToWideChar(CP_UTF8, 0, (const char *)utf8Answer, -1, pairs[i].answer, aLen);
-
-        i++;
+        pairs[rowCount].question = question;
+        pairs[rowCount].answer = answer;
+        rowCount++;
     }
 
     sqlite3_finalize(stmt);
-    *count = tmpCount;
+    if (result != SQLITE_DONE) {
+        Db_FreeResults(pairs, rowCount);
+        return NULL;
+    }
+    if (rowCount == 0) {
+        free(pairs);
+        return NULL;
+    }
 
+    *count = rowCount;
     return pairs;
 }
 
@@ -329,9 +411,15 @@ int Db_ImportFromText(DbContext *ctx, const wchar_t *text)
     }
 
     int importedCount = 0;
+    BOOL failed = FALSE;
     wchar_t *line = _wcsdup(text);
     if (!line) {
         return DB_ERROR_MEMORY;
+    }
+
+    if (sqlite3_exec(ctx->db, "BEGIN IMMEDIATE;", NULL, NULL, NULL) != SQLITE_OK) {
+        free(line);
+        return DB_ERROR_EXEC;
     }
 
     // 按行分割
@@ -368,8 +456,11 @@ int Db_ImportFromText(DbContext *ctx, const wchar_t *text)
                         // 跳过多余的空格
                         while (*(space + 1) == L' ' || *(space + 1) == L'\t') space++;
                         if (wcslen(question) > 0 && wcslen(answer) > 0) {
-                            Db_Insert(ctx, question, answer);
-                            importedCount++;
+                            if (Db_Insert(ctx, question, answer) == DB_OK) {
+                                importedCount++;
+                            } else {
+                                failed = TRUE;
+                            }
                         }
                         break;
                     }
@@ -383,6 +474,14 @@ int Db_ImportFromText(DbContext *ctx, const wchar_t *text)
     }
 
     free(line);
+    if (failed) {
+        sqlite3_exec(ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+        return DB_ERROR_EXEC;
+    }
+    if (sqlite3_exec(ctx->db, "COMMIT;", NULL, NULL, NULL) != SQLITE_OK) {
+        sqlite3_exec(ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+        return DB_ERROR_EXEC;
+    }
     return importedCount;
 }
 

@@ -1,147 +1,75 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Emilio Vasquez — Chef & C Programmer</title>
+<title>学习通 - 输入测试</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  * { box-sizing: border-box; }
   body {
-    font-family: Georgia, 'Times New Roman', serif;
-    background: #fdf6ec;
-    color: #3a3226;
-    line-height: 1.8;
-    max-width: 680px;
-    margin: 0 auto;
-    padding: 60px 24px 80px;
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    background: #f5f7fa;
+    color: #333;
+    font-family: -apple-system, BlinkMacSystemFont, "Microsoft YaHei", sans-serif;
   }
-  h1 {
-    font-size: 2rem;
-    font-weight: normal;
-    margin-bottom: 4px;
-    letter-spacing: 0.5px;
+  main {
+    width: min(520px, calc(100% - 32px));
+    padding: 32px;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 4px 18px rgb(0 0 0 / 8%);
   }
-  .tagline {
-    font-size: 0.95rem;
-    color: #8b7355;
-    margin-bottom: 48px;
+  h1 { margin: 0 0 28px; color: #3b82f6; font-size: 24px; text-align: center; }
+  .article {
+    margin: 0 0 24px;
+    padding: 16px;
+    border-radius: 4px;
+    background: #f5f7fa;
+    line-height: 1.9;
   }
-  h2 {
-    font-size: 1.1rem;
-    font-weight: normal;
-    margin: 40px 0 16px;
-    color: #6b5a42;
-    letter-spacing: 1px;
+  .article h2 { margin: 0 0 8px; font-size: 16px; }
+  .article p { margin: 0; }
+  label { display: block; margin-bottom: 10px; }
+  textarea {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    font: inherit;
+    resize: vertical;
   }
-  p { margin-bottom: 18px; }
-  .timeline {
-    list-style: none;
-    margin: 16px 0 32px;
-  }
-  .timeline li {
-    display: flex;
-    padding: 10px 0;
-    border-bottom: 1px solid #e8dcc8;
-  }
-  .timeline .year {
-    flex: 0 0 110px;
-    color: #a3916e;
-    font-size: 0.9rem;
-  }
-  .timeline .entry {
-    flex: 1;
-  }
-  .entry strong { font-weight: normal; color: #5a4a32; }
-  .entry small { color: #a3916e; display: block; font-size: 0.82rem; }
-  .quote {
-    background: #f9f2e4;
-    border-left: 3px solid #d4b896;
-    padding: 16px 20px;
-    margin: 32px 0;
-    font-style: italic;
-    color: #6b5a42;
-  }
-  a {
-    color: #8b6914;
-    text-decoration: none;
-    border-bottom: 1px solid #d4b896;
-  }
-  a:hover { color: #5a3e0e; border-color: #5a3e0e; }
-  .footer {
-    margin-top: 64px;
-    padding-top: 24px;
-    border-top: 1px solid #e8dcc8;
-    font-size: 0.85rem;
-    color: #a3916e;
-  }
+  textarea:focus { outline: none; border-color: #3b82f6; }
+  #paste-message { min-height: 1.5em; margin: 10px 0 0; color: #e24a4a; font-size: 14px; }
 </style>
 </head>
 <body>
+  <main>
+    <h1>学习通 - 输入测试</h1>
+    <section class="article">
+      <h2>《岳阳楼记》节选</h2>
+      <p>庆历四年春，滕子京谪守巴陵郡。越明年，政通人和，百废具兴。乃重修岳阳楼，增其旧制，刻唐贤今人诗赋于其上。属予作文以记之。予观夫巴陵胜状，在洞庭一湖。衔远山，吞长江，浩浩汤汤，横无际涯；朝晖夕阴，气象万千。此则岳阳楼之大观也，前人之述备矣。</p>
+    </section>
+    <label for="no-paste-input">请手动输入上方 100 字</label>
+    <textarea id="no-paste-input" rows="6" autocomplete="off" placeholder="请手动输入"></textarea>
+    <p id="paste-message" aria-live="polite"></p>
+  </main>
 
-<h1>Emilio Vasquez</h1>
-<p class="tagline">Retired chef. Learned C at 50. Still cooking.</p>
+  <script>
+    const input = document.getElementById('no-paste-input');
+    const message = document.getElementById('paste-message');
 
-<h2>Life</h2>
+    function blockPaste(event) {
+      event.preventDefault();
+      message.textContent = '不允许粘贴，请手动输入。';
+    }
 
-<p>Born in 1949 in Puerto Garza, a fishing village on the coast of Isla Chiquita. My father was a fisherman, my mother sold fried plantains at the local market.</p>
-
-<p>Left school at 12 to wash dishes at <strong>El Pelícano Azul</strong>, a portside kitchen where an old Argentine sailor taught me how to make seafood stew. At 19, I bought a bus ticket to São Paulo and spent ten years as a line cook at <strong>Cantina do Marinheiro</strong>, learning Portuguese-style seafood rice.</p>
-
-<p>Returned home at 35 and opened my own restaurant, <strong>La Olla de Cobre</strong>, in the capital city of Santa Lucía. Ran it for 28 years. Closed the doors in 2020 when the pandemic hit, and retired.</p>
-
-<h2>Work History</h2>
-
-<ul class="timeline">
-  <li>
-    <span class="year">1961–1968</span>
-    <span class="entry">
-      <strong>El Pelícano Azul</strong>
-      <small>Puerto Garza — Dishwasher → Junior Cook</small>
-    </span>
-  </li>
-  <li>
-    <span class="year">1969–1979</span>
-    <span class="entry">
-      <strong>Cantina do Marinheiro</strong>
-      <small>São Paulo, Brazil — Line Cook</small>
-    </span>
-  </li>
-  <li>
-    <span class="year">1984–2020</span>
-    <span class="entry">
-      <strong>La Olla de Cobre</strong>
-      <small>Santa Lucía — Owner &amp; Head Chef</small>
-    </span>
-  </li>
-  <li>
-    <span class="year">2015–2017</span>
-    <span class="entry">
-      <strong>TallerSoft S.A.</strong>
-      <small>Santa Lucía — Part-time C Programmer</small>
-    </span>
-  </li>
-</ul>
-
-<h2>How I Found Programming</h2>
-
-<p>At age 50, my son brought home an old laptop with Turbo C 2.0 installed. I opened it out of curiosity and never stopped. C reminded me of cooking — simple ingredients, everything depends on technique. No shortcuts.</p>
-
-<p>At 69, I uploaded my first project to GitHub. It was a small tool to auto-type menu entries for restaurant back-of-house systems. That tool eventually became <a href="https://github.com/shenyuhao1/baoxiaoxin-writer">BaoXiaoXin Writer</a>.</p>
-
-<div class="quote">
-  I build tiny, zero-dependency tools in pure C. No frameworks, no runtimes, no bloat. Just a well-seasoned pan and a sharp knife.
-</div>
-
-<h2>My Project</h2>
-
-<p><a href="https://github.com/shenyuhao1/baoxiaoxin-writer">BaoXiaoXin Writer</a> — a keyboard simulation tool for Windows. Paste text character-by-character where copy-paste is blocked. Full Unicode support. Built-in Q&amp;A database with fuzzy search. 58KB, pure C, zero dependencies.</p>
-
-<p>Download the latest release, put it in a folder with <code>sqlite3.dll</code>, and double-click. No installer. No runtime. Nothing to configure.</p>
-
-<div class="footer">
-  &copy; 2025 Emilio Vasquez &middot; Santa Lucía, Isla Chiquita<br>
-  <a href="mailto:emilio.vasquez.git@proton.me">emilio.vasquez.git@proton.me</a>
-</div>
-
+    input.addEventListener('paste', blockPaste);
+    input.addEventListener('drop', blockPaste);
+    input.addEventListener('contextmenu', blockPaste);
+    input.addEventListener('input', () => { message.textContent = ''; });
+  </script>
 </body>
 </html>

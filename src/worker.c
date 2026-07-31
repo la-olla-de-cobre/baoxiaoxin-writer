@@ -402,18 +402,32 @@ HANDLE Worker_Start(WorkerParams *params)
 {
     uintptr_t threadHandle;
 
+    if (!params) {
+        return NULL;
+    }
+
     params->hEventPause = CreateEventW(NULL, TRUE, TRUE, NULL);
     params->hEventStop  = CreateEventW(NULL, FALSE, FALSE, NULL);
     params->stopped     = 0;
 
     if (!params->hEventPause || !params->hEventStop) {
-        Worker_Free(params);
+        if (params->hEventPause) {
+            CloseHandle(params->hEventPause);
+            params->hEventPause = NULL;
+        }
+        if (params->hEventStop) {
+            CloseHandle(params->hEventStop);
+            params->hEventStop = NULL;
+        }
         return NULL;
     }
 
     threadHandle = _beginthreadex(NULL, 0, WorkerThread, params, 0, NULL);
     if (threadHandle == 0) {
-        Worker_Free(params);
+        CloseHandle(params->hEventPause);
+        CloseHandle(params->hEventStop);
+        params->hEventPause = NULL;
+        params->hEventStop = NULL;
         return NULL;
     }
 
