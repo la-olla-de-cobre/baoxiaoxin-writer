@@ -6,6 +6,8 @@
 
 BaoXiaoXin Writer 从剪贴板或文本面板读取内容，通过 Windows `SendInput` 逐字符发送到当前焦点窗口。它支持完整 Unicode 输入、可调速输入、全局热键、题库搜索，以及面向 Python 在线代码编辑器的自动缩进补偿。
 
+> **首次运行请注意：** 双击 `KeyboardSim.exe` 后，程序默认进入系统托盘并在后台运行，不会自动弹出主窗口。这是正常的初始状态，不是启动失败。请在任务栏右下角的通知区域找到程序图标，右键选择“打开主窗口”。
+
 > 项目定位是本地输入辅助和开发工具。请遵守目标网站的使用规则、考试规定和服务条款。
 
 ## 主要功能
@@ -19,6 +21,16 @@ BaoXiaoXin Writer 从剪贴板或文本面板读取内容，通过 Windows `Send
 - **浅色界面**：默认使用浅灰/白色背景，适合长时间使用。
 - **响应式输入线程**：输入任务运行在独立 worker 线程中，主界面保持响应。
 
+## 界面预览
+
+主界面用于加载文本、调整输入速度、开始或停止输入，以及进入题库管理。
+
+![BaoXiaoXin Writer 主界面](screenshot1.png)
+
+题库管理界面支持批量导入、单条添加、删除和导出题目。
+
+![BaoXiaoXin Writer 题库管理界面](screenshot2.png)
+
 ## 工作流程
 
 ![Clipboard to editor workflow](assets/workflow.png)
@@ -31,12 +43,14 @@ BaoXiaoXin Writer 从剪贴板或文本面板读取内容，通过 Windows `Send
 
 从 Releases 下载 `KeyboardSim.exe`，双击运行即可，无需安装 Python 或 SQLite DLL。
 
-1. 复制要输入的文本。
-2. 将光标放到目标输入框。
-3. 按 `Ctrl+Alt+V` 开始输入。
-4. 按 `Ctrl+Alt+S` 立即停止。
+1. 双击运行 `KeyboardSim.exe`。程序会进入系统托盘，主窗口不会自动显示。
+2. 如需调整速度、输入模式或题库，请在任务栏右下角找到托盘图标，右键选择“打开主窗口”。
+3. 复制要输入的文本。
+4. 将光标放到目标输入框。
+5. 按 `Ctrl+Alt+V` 开始输入。
+6. 按 `Ctrl+Alt+S` 立即停止。
 
-程序可以缩到系统托盘运行。需要修改速度、输入模式或题库时，右键托盘图标打开主窗口。
+如果托盘图标没有直接显示，请先点击任务栏通知区域的向上箭头，在隐藏图标中查找。需要完全退出时，请右键托盘图标并选择“退出”。打开主窗口后，点击窗口关闭按钮也会结束程序。
 
 ### Python 在线编辑器模式
 
@@ -95,12 +109,6 @@ mingw32-make TARGET=KeyboardSim.exe
 
 ```text
 KeyboardSim.exe
-```
-
-也可以使用：
-
-```bat
-build.bat
 ```
 
 GitHub Actions 会在 Windows runner 上使用 MSYS2/MinGW 自动执行构建检查。
