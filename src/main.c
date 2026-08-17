@@ -515,13 +515,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
         return 0;
 
-    case WM_ERASEBKGND: {
-        HDC hdc = (HDC)wParam;
-        RECT rc;
-        GetClientRect(hwnd, &rc);
-        FillRect(hdc, &rc, g_ui.hbrBg);
-        return 1;
-    }
+    case WM_ERASEBKGND:
+        return UI_OnEraseBkgnd(&g_ui, (HDC)wParam);
 
     case WM_DRAWITEM:
         return UI_OnDrawItem(&g_ui, wParam, lParam);

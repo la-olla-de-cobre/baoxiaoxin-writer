@@ -20,6 +20,12 @@
 #define CLR_BG_LIGHT      RGB(245, 246, 250)
 #define CLR_PANEL_LIGHT   RGB(255, 255, 255)
 #define CLR_TEXT_LIGHT    RGB(30,  30,  30)
+#define CLR_TEXT_DIM_L    RGB(112, 116, 132)  // 次要文本（分组标题、提示）
+#define CLR_BORDER_LIGHT  RGB(226, 228, 236)  // 卡片边框与分隔线
+
+// 卡片圆角与栅格（逻辑像素，实际按 DPI 缩放）
+#define CARD_RADIUS       8
+#define GRID              4   // 间距基数，所有间距取其整数倍
 
 // 按钮角色枚举
 typedef enum {
@@ -54,8 +60,15 @@ typedef struct {
 
     HFONT hFontUI;
     HFONT hFontEdit;
+    HFONT hFontLabel;   // 小一号，用于分组标题与热键提示
     BOOL  darkMode;
     int   dpi;          // 当前窗口 DPI；96 = 100% 缩放
+
+    // 由 UI_Layout 算出、供 UI_OnEraseBkgnd 绘制的卡片与分隔线
+    RECT  rcCardText;   // 左侧文本卡片
+    RECT  rcCardPanel;  // 右侧控制卡片
+    int   sepY[4];      // 面板内分隔线的 y 坐标
+    int   sepCount;
 
     // owner-draw 按钮状态
     BOOL     btnHover[MAX_BTNS];
@@ -99,6 +112,8 @@ void UI_ResizeToScaled(HWND hwnd, AppUI *ui, int logicalW, int logicalH);
 void UI_SetDarkMode(AppUI *ui, BOOL dark);
 
 // WndProc 转发
+// 绘制窗口背景：底色 + 两块圆角卡片 + 分组分隔线
+LRESULT UI_OnEraseBkgnd(AppUI *ui, HDC hdc);
 LRESULT UI_OnDrawItem(AppUI *ui, WPARAM wParam, LPARAM lParam);
 LRESULT UI_OnCtlColor(AppUI *ui, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 void    UI_OnMouseMove(AppUI *ui, HWND hwndBtn);
