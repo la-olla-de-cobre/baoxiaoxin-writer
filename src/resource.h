@@ -37,6 +37,13 @@
 #define IDC_CHK_FUZZY        1017
 #define IDC_CHK_CODE_MODE    1018
 
+// ── 外观 ─────────────────────────────────────────────────
+#define IDC_CHK_DARK         1019
+
+// 主窗口逻辑尺寸（96 DPI 下的像素）。实际尺寸按当前 DPI 缩放。
+#define WIN_LOGICAL_W        760
+#define WIN_LOGICAL_H        520
+
 // ── 题库管理对话框控件 ID ──────────────────────────────────
 #define IDD_QA_MANAGER       101
 #define IDC_TAB_QA_MANAGER   102

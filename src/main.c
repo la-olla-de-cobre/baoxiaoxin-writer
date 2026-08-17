@@ -20,6 +20,11 @@
 #include "mem.h"
 #include "textfile.h"
 
+// MinGW 较老的头文件里可能没有这个消息定义
+#ifndef WM_DPICHANGED
+#define WM_DPICHANGED 0x02E0
+#endif
+
 // ── 全局状态 ─────────────────────────────────────────────
 static AppUI     g_ui;
 static AppConfig g_cfg;
@@ -40,8 +45,10 @@ static BOOL g_syncingInterval = FALSE;
 // 单实例互斥体，随进程存活
 static HANDLE g_hSingleInstance = NULL;
 
-// 托盘图标句柄（自定义图标，退出时销毁）
-static HICON  g_hTrayIcon = NULL;
+// 托盘图标句柄。只有自己 LoadImageW 出来的才需要 DestroyIcon；
+// 回退到系统共享图标时不能销毁。
+static HICON  g_hTrayIcon      = NULL;
+static BOOL   g_trayIconOwned  = FALSE;
 
 // 热键注册结果。程序以托盘 + 热键为主要交互，注册失败必须让用户知道。
 static BOOL g_hotkeyStart  = FALSE;
@@ -480,7 +487,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 IMAGE_ICON,
                 GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON),
                 LR_DEFAULTCOLOR);
+            g_trayIconOwned = (g_hTrayIcon != NULL);
             if (!g_hTrayIcon) {
+                // 系统共享图标，不归我们所有
                 g_hTrayIcon = LoadIconW(NULL, IDI_APPLICATION);
             }
 
@@ -493,6 +502,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             wcscpy(nid.szTip, APP_TITLE);
             Shell_NotifyIconW(NIM_ADD, &nid);
         }
+
+        // 按当前 DPI 把窗口放大到等效逻辑尺寸并居中。
+        // manifest 声明 PerMonitorV2，Windows 不会替我们拉伸。
+        UI_ResizeToScaled(hwnd, &g_ui, WIN_LOGICAL_W, WIN_LOGICAL_H);
+
+        // 接通配置里的深色模式（此前 UI_Create 硬编码为浅色）
+        UI_SetDarkMode(&g_ui, g_cfg.darkMode);
 
         // 托盘图标就绪后再注册热键，失败提示才有地方可弹
         ReportHotkeyStatus(hwnd, RegisterAppHotkeys(hwnd), FALSE);
@@ -512,11 +528,28 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
     case WM_CTLCOLORSTATIC:
     case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORBTN:
         return UI_OnCtlColor(&g_ui, hwnd, msg, wParam, lParam);
 
     case WM_SIZE:
         UI_Layout(&g_ui, LOWORD(lParam), HIWORD(lParam));
         UI_ApplyWindowStyling(hwnd, g_cfg.darkMode);
+        return 0;
+
+    case WM_DPICHANGED:
+        // 拖到另一块缩放比例不同的显示器：重建字体，采用系统建议的窗口矩形，
+        // 随后的 WM_SIZE 会用新 DPI 重新布局。
+        UI_UpdateDpi(&g_ui, HIWORD(wParam));
+        {
+            RECT *suggested = (RECT *)lParam;
+            if (suggested) {
+                SetWindowPos(hwnd, NULL,
+                             suggested->left, suggested->top,
+                             suggested->right - suggested->left,
+                             suggested->bottom - suggested->top,
+                             SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+        }
         return 0;
 
     case WM_HOTKEY:
@@ -561,6 +594,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         if (id == IDC_CHK_CODE_MODE && code == BN_CLICKED) {
             g_cfg.codeInputMode =
                 (SendMessageW(g_ui.hwndChkCodeMode, BM_GETCHECK, 0, 0) == BST_CHECKED);
+            return 0;
+        }
+        if (id == IDC_CHK_DARK && code == BN_CLICKED) {
+            g_cfg.darkMode =
+                (SendMessageW(g_ui.hwndChkDark, BM_GETCHECK, 0, 0) == BST_CHECKED);
+            UI_SetDarkMode(&g_ui, g_cfg.darkMode);
             return 0;
         }
 
@@ -661,10 +700,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         Db_Close(&g_dbCtx);
         Config_Save(&g_cfg, g_iniPath);
         UI_Destroy(&g_ui);
-        if (g_hTrayIcon) {
+        if (g_hTrayIcon && g_trayIconOwned) {
             DestroyIcon(g_hTrayIcon);
-            g_hTrayIcon = NULL;
         }
+        g_hTrayIcon = NULL;
         PostQuitMessage(0);
         return 0;
     }
@@ -739,10 +778,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     if (!wc.hIconSm) wc.hIconSm = wc.hIcon;
     RegisterClassExW(&wc);
 
-    // 居中创建窗口
+    // 先按逻辑尺寸居中创建，WM_CREATE 里再按实际 DPI 缩放并重新居中
     int screenW = GetSystemMetrics(SM_CXSCREEN);
     int screenH = GetSystemMetrics(SM_CYSCREEN);
-    int winW = 760, winH = 520;
+    int winW = WIN_LOGICAL_W, winH = WIN_LOGICAL_H;
     int x = (screenW - winW) / 2;
     int y = (screenH - winH) / 2;
 

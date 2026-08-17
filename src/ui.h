@@ -50,9 +50,12 @@ typedef struct {
     HWND hwndChkUsePanel;
     HWND hwndChkCodeMode;
 
+    HWND hwndChkDark;
+
     HFONT hFontUI;
     HFONT hFontEdit;
     BOOL  darkMode;
+    int   dpi;          // 当前窗口 DPI；96 = 100% 缩放
 
     // owner-draw 按钮状态
     BOOL     btnHover[MAX_BTNS];
@@ -80,6 +83,20 @@ void UI_SetHotkeyHint(AppUI *ui, BOOL okStart, BOOL okSearch, BOOL okStop);
 void UI_SetPresetSelection(AppUI *ui, int delayMs);
 void UI_ApplyWindowStyling(HWND hwnd, BOOL darkMode);
 void UI_Destroy(AppUI *ui);
+
+// ── DPI ─────────────────────────────────────────────────
+// 取窗口所在显示器的 DPI（动态解析 GetDpiForWindow，旧系统回退到设备 DC）
+int  UI_GetWindowDpi(HWND hwnd);
+// 按逻辑像素换算为当前 DPI 下的物理像素
+int  UI_Scale(const AppUI *ui, int logical);
+// DPI 变化时重建字体并重新套用到所有控件（跨屏拖动时调用）
+void UI_UpdateDpi(AppUI *ui, int dpi);
+// 把逻辑尺寸的窗口按当前 DPI 缩放并居中
+void UI_ResizeToScaled(HWND hwnd, AppUI *ui, int logicalW, int logicalH);
+
+// ── 深色模式 ─────────────────────────────────────────────
+// 切换配色：重建画刷并整窗重绘
+void UI_SetDarkMode(AppUI *ui, BOOL dark);
 
 // WndProc 转发
 LRESULT UI_OnDrawItem(AppUI *ui, WPARAM wParam, LPARAM lParam);
