@@ -17,6 +17,8 @@
 #include "worker.h"
 #include "database.h"
 #include "qa_ui.h"
+#include "mem.h"
+#include "textfile.h"
 
 // ── 全局状态 ─────────────────────────────────────────────
 static AppUI     g_ui;
@@ -28,15 +30,118 @@ static WorkerParams *g_worker = NULL;
 static HANDLE        g_hThread = NULL;
 
 static DbContext     g_dbCtx;
+// 记录启动时数据库初始化的结果，供打开题库时说明失败原因
+static int           g_dbInitError = DB_OK;
+static wchar_t       g_dbInitPath[MAX_PATH];
 
 // 防止 Trackbar ↔ EditInterval 互相触发
 static BOOL g_syncingInterval = FALSE;
+
+// 单实例互斥体，随进程存活
+static HANDLE g_hSingleInstance = NULL;
+
+// 托盘图标句柄（自定义图标，退出时销毁）
+static HICON  g_hTrayIcon = NULL;
+
+// 热键注册结果。程序以托盘 + 热键为主要交互，注册失败必须让用户知道。
+static BOOL g_hotkeyStart  = FALSE;
+static BOOL g_hotkeySearch = FALSE;
+static BOOL g_hotkeyStop   = FALSE;
+
+// 关闭按钮默认收回托盘；只有托盘菜单「退出」才真正结束进程。
+static BOOL g_allowExit      = FALSE;
+static BOOL g_hideHintShown  = FALSE;
 
 // ── 从剪切板读取文本并直接开始输入 ───────────────────────
 
 static wchar_t* GetClipboardText(void);  // 前向声明
 static void SetState(int newState);       // 前向声明
 static int  GetCurrentDelay(void);        // 前向声明
+
+// ── 托盘气泡提示 ─────────────────────────────────────────
+// 用气泡而不是 MessageBox：不抢焦点、不阻塞启动，而且出现在
+// 程序真正待着的地方（托盘）。
+static void ShowTrayBalloon(HWND hwnd, const wchar_t *title,
+                            const wchar_t *text, DWORD iconFlag)
+{
+    NOTIFYICONDATAW nid = {0};
+
+    nid.cbSize = sizeof(nid);
+    nid.hWnd   = hwnd;
+    nid.uID    = 1;
+    nid.uFlags = NIF_INFO;
+    nid.dwInfoFlags = iconFlag;
+    wcsncpy(nid.szInfoTitle, title,
+            sizeof(nid.szInfoTitle) / sizeof(nid.szInfoTitle[0]) - 1);
+    wcsncpy(nid.szInfo, text,
+            sizeof(nid.szInfo) / sizeof(nid.szInfo[0]) - 1);
+    Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+
+// 显示并置前主窗口。托盘左键、托盘菜单和第二个实例都走这里。
+static void ShowMainWindow(HWND hwnd)
+{
+    if (IsIconic(hwnd)) {
+        ShowWindow(hwnd, SW_RESTORE);
+    } else {
+        ShowWindow(hwnd, SW_SHOW);
+    }
+    SetForegroundWindow(hwnd);
+}
+
+// ── 热键注册与状态反馈 ───────────────────────────────────
+
+// 注册三个全局热键，逐个记录成功与否。返回失败个数。
+static int RegisterAppHotkeys(HWND hwnd)
+{
+    int failed = 0;
+
+    // 重试前先撤销已有注册，避免「已注册」本身导致失败
+    UnregisterHotKey(hwnd, HOTKEY_START);
+    UnregisterHotKey(hwnd, HOTKEY_SEARCH);
+    UnregisterHotKey(hwnd, HOTKEY_STOP);
+
+    g_hotkeyStart  = RegisterHotKey(hwnd, HOTKEY_START,  MOD_CONTROL | MOD_ALT, 'V');
+    g_hotkeySearch = RegisterHotKey(hwnd, HOTKEY_SEARCH, MOD_CONTROL | MOD_ALT, 'B');
+    g_hotkeyStop   = RegisterHotKey(hwnd, HOTKEY_STOP,   MOD_CONTROL | MOD_ALT, 'S');
+
+    if (!g_hotkeyStart)  ++failed;
+    if (!g_hotkeySearch) ++failed;
+    if (!g_hotkeyStop)   ++failed;
+
+    UI_SetHotkeyHint(&g_ui, g_hotkeyStart, g_hotkeySearch, g_hotkeyStop);
+    return failed;
+}
+
+// 把注册结果告诉用户。热键失败不致命——主窗口仍可操作，所以是降级 + 警告。
+static void ReportHotkeyStatus(HWND hwnd, int failed, BOOL isRetry)
+{
+    if (failed == 0) {
+        UI_SetStatus(&g_ui, L"就绪");
+        if (isRetry) {
+            ShowTrayBalloon(hwnd, APP_NAME,
+                            L"三个热键已全部注册成功。", NIIF_INFO);
+        }
+        return;
+    }
+
+    {
+        wchar_t text[512];
+        wchar_t list[256] = L"";
+
+        if (!g_hotkeyStart)  wcscat(list, L"Ctrl+Alt+V（开始输入）\n");
+        if (!g_hotkeySearch) wcscat(list, L"Ctrl+Alt+B（搜索题库）\n");
+        if (!g_hotkeyStop)   wcscat(list, L"Ctrl+Alt+S（停止输入）\n");
+
+        wsprintfW(text,
+                  L"以下热键被其他程序占用，暂不可用：\n%s"
+                  L"可从托盘打开主窗口手动操作，或关闭占用程序后"
+                  L"用托盘菜单「重试注册热键」。",
+                  list);
+        ShowTrayBalloon(hwnd, APP_NAME, text, NIIF_WARNING);
+        UI_SetStatus(&g_ui, L"部分热键被占用，详见托盘提示");
+    }
+}
 
 // 停止输入（ESC 热键调用）
 static void StopInput(void)
@@ -62,27 +167,26 @@ static void StartInput(void)
             UI_SetStatus(&g_ui, L"文本框为空！");
             return;
         }
-        text = (wchar_t *)HeapAlloc(GetProcessHeap(), 0, (textLen + 1) * sizeof(wchar_t));
+        text = (wchar_t *)Mem_Alloc((textLen + 1) * sizeof(wchar_t));
         if (!text) return;
         GetWindowTextW(g_ui.hwndEditText, text, textLen + 1);
     } else {
         // 从剪切板读取
         wchar_t *clipText = GetClipboardText();
         if (!clipText || wcslen(clipText) == 0) {
-            free(clipText);
+            Mem_Free(clipText);
             UI_SetStatus(&g_ui, L"剪切板为空！");
             return;
         }
         textLen = (int)wcslen(clipText);
-        text = (wchar_t *)HeapAlloc(GetProcessHeap(), 0, (textLen + 1) * sizeof(wchar_t));
-        if (!text) { free(clipText); return; }
+        text = (wchar_t *)Mem_Alloc((textLen + 1) * sizeof(wchar_t));
+        if (!text) { Mem_Free(clipText); return; }
         wcscpy(text, clipText);
-        free(clipText);
+        Mem_Free(clipText);
     }
 
-    g_worker = (WorkerParams *)HeapAlloc(GetProcessHeap(),
-                                          HEAP_ZERO_MEMORY, sizeof(WorkerParams));
-    if (!g_worker) { HeapFree(GetProcessHeap(), 0, text); return; }
+    g_worker = (WorkerParams *)Mem_AllocZero(sizeof(WorkerParams));
+    if (!g_worker) { Mem_Free(text); return; }
 
     g_worker->text      = text;
     g_worker->textLen   = textLen;
@@ -120,7 +224,7 @@ static wchar_t* GetClipboardText(void)
     wchar_t *p = (wchar_t *)GlobalLock(hData);
     if (p) {
         size_t len = wcslen(p);
-        text = (wchar_t *)malloc((len + 1) * sizeof(wchar_t));
+        text = (wchar_t *)Mem_Alloc((len + 1) * sizeof(wchar_t));
         if (text) {
             wcscpy(text, p);
         }
@@ -148,7 +252,7 @@ static void SearchFromClipboard(void)
     }
 
     if (len == 0) {
-        free(clipboardText);
+        Mem_Free(clipboardText);
         UI_SetStatus(&g_ui, L"剪切板内容为空！");
         return;
     }
@@ -177,7 +281,7 @@ static void SearchFromClipboard(void)
                 CloseClipboard();
             }
         }
-        free(answer);
+        Mem_Free(answer);
     } else {
         if (IsWindowVisible(g_ui.hwndMain)) {
             UI_SetStatus(&g_ui, L"暂未搜索到相应答案！");
@@ -185,13 +289,22 @@ static void SearchFromClipboard(void)
         }
     }
 
-    free(clipboardText);
+    Mem_Free(clipboardText);
 }
 
 static void OnBtnDatabase(void)
 {
-    // 如果数据库未初始化，先初始化
+    // 如果数据库未初始化，先说明启动时的失败原因，再尝试默认路径
     if (!Db_IsInitialized(&g_dbCtx)) {
+        if (g_dbInitError != DB_OK && g_dbInitPath[0]) {
+            wchar_t msg[MAX_PATH + 160];
+            wsprintfW(msg,
+                L"启动时无法打开配置的题库数据库：\n%s\n\n错误代码：%d\n\n"
+                L"将改用默认路径重试。",
+                g_dbInitPath, g_dbInitError);
+            MessageBoxW(g_ui.hwndMain, msg, L"题库数据库", MB_ICONWARNING);
+        }
+
         // 构建数据库路径：%APPDATA%\KeyboardSim\qa_database.db
         wchar_t appData[MAX_PATH];
         SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appData);
@@ -204,9 +317,13 @@ static void OnBtnDatabase(void)
 
         int result = Db_Init(&g_dbCtx, g_cfg.dbPath);
         if (result != DB_OK) {
-            MessageBoxW(g_ui.hwndMain, L"无法初始化数据库！", L"错误", MB_ICONERROR);
+            wchar_t msg[MAX_PATH + 128];
+            wsprintfW(msg, L"无法初始化数据库！\n%s\n\n错误代码：%d",
+                      g_cfg.dbPath, result);
+            MessageBoxW(g_ui.hwndMain, msg, L"错误", MB_ICONERROR);
             return;
         }
+        g_dbInitError = DB_OK;
     }
 
     // 显示题库管理对话框
@@ -236,81 +353,20 @@ static void SetState(int newState)
     }
 }
 
-// 加载文件并检测编码（UTF-8 BOM / UTF-16 LE / UTF-16 BE / 无BOM默认UTF-8）
+// 加载文件到文本面板。编码探测与体积上限由 TextFile_Load 统一处理。
 static BOOL LoadTextFile(const wchar_t *path)
 {
-    HANDLE hFile = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ,
-                               NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hFile == INVALID_HANDLE_VALUE) {
-        MessageBoxW(g_ui.hwndMain, L"无法打开文件。", L"错误", MB_ICONERROR);
+    TextFileStatus status = TEXTFILE_OK;
+    wchar_t *text = TextFile_Load(path, &status);
+
+    if (!text) {
+        MessageBoxW(g_ui.hwndMain, TextFile_StatusText(status),
+                    L"错误", MB_ICONERROR);
         return FALSE;
     }
 
-    DWORD fileSize = GetFileSize(hFile, NULL);
-    if (fileSize == 0 || fileSize == INVALID_FILE_SIZE) {
-        CloseHandle(hFile);
-        return FALSE;
-    }
-
-    BYTE *raw = (BYTE *)HeapAlloc(GetProcessHeap(), 0, fileSize + 4);
-    if (!raw) { CloseHandle(hFile); return FALSE; }
-
-    DWORD bytesRead = 0;
-    if (!ReadFile(hFile, raw, fileSize, &bytesRead, NULL) || bytesRead != fileSize) {
-        CloseHandle(hFile);
-        HeapFree(GetProcessHeap(), 0, raw);
-        MessageBoxW(g_ui.hwndMain, L"读取文件失败。", L"错误", MB_ICONERROR);
-        return FALSE;
-    }
-    CloseHandle(hFile);
-    raw[bytesRead] = raw[bytesRead+1] = raw[bytesRead+2] = 0;
-
-    wchar_t *wtext = NULL;
-    int wlen = 0;
-
-    if (bytesRead >= 2 && raw[0] == 0xFF && raw[1] == 0xFE) {
-        // UTF-16 LE
-        wtext = (wchar_t *)(raw + 2);
-        wlen  = (int)((bytesRead - 2) / sizeof(wchar_t));
-        wchar_t *copy = (wchar_t *)HeapAlloc(GetProcessHeap(), 0, (wlen + 1) * sizeof(wchar_t));
-        if (copy) {
-            memcpy(copy, wtext, wlen * sizeof(wchar_t));
-            copy[wlen] = 0;
-            SetWindowTextW(g_ui.hwndEditText, copy);
-            HeapFree(GetProcessHeap(), 0, copy);
-        }
-    } else if (bytesRead >= 2 && raw[0] == 0xFE && raw[1] == 0xFF) {
-        // UTF-16 BE — 字节交换
-        int chars = (int)((bytesRead - 2) / 2);
-        wchar_t *copy = (wchar_t *)HeapAlloc(GetProcessHeap(), 0, (chars + 1) * sizeof(wchar_t));
-        if (copy) {
-            BYTE *src = raw + 2;
-            for (int i = 0; i < chars; ++i) {
-                copy[i] = (wchar_t)((src[i*2] << 8) | src[i*2+1]);
-            }
-            copy[chars] = 0;
-            SetWindowTextW(g_ui.hwndEditText, copy);
-            HeapFree(GetProcessHeap(), 0, copy);
-        }
-    } else {
-        // UTF-8（有无BOM均可）
-        BYTE *utf8 = raw;
-        DWORD utf8Len = bytesRead;
-        if (bytesRead >= 3 && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF) {
-            utf8    = raw + 3;
-            utf8Len = bytesRead - 3;
-        }
-        wlen = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)utf8, (int)utf8Len, NULL, 0);
-        wchar_t *copy = (wchar_t *)HeapAlloc(GetProcessHeap(), 0, (wlen + 1) * sizeof(wchar_t));
-        if (copy) {
-            MultiByteToWideChar(CP_UTF8, 0, (LPCCH)utf8, (int)utf8Len, copy, wlen);
-            copy[wlen] = 0;
-            SetWindowTextW(g_ui.hwndEditText, copy);
-            HeapFree(GetProcessHeap(), 0, copy);
-        }
-    }
-
-    HeapFree(GetProcessHeap(), 0, raw);
+    SetWindowTextW(g_ui.hwndEditText, text);
+    Mem_Free(text);
     return TRUE;
 }
 
@@ -407,9 +463,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         UI_SetIntervalText(&g_ui, g_cfg.delayMs);
         SendMessageW(g_ui.hwndTrackbar, TBM_SETPOS, TRUE, g_cfg.delayMs);
         UI_SetPresetSelection(&g_ui, g_cfg.delayMs);
-        RegisterHotKey(hwnd, HOTKEY_START, MOD_CONTROL | MOD_ALT, 'V');
-        RegisterHotKey(hwnd, HOTKEY_SEARCH, MOD_CONTROL | MOD_ALT, 'B');
-        RegisterHotKey(hwnd, HOTKEY_STOP, MOD_CONTROL | MOD_ALT, 'S');
         SendMessageW(g_ui.hwndChkTopmost, BM_SETCHECK,
             g_cfg.alwaysOnTop ? BST_CHECKED : BST_UNCHECKED, 0);
         SendMessageW(g_ui.hwndChkCodeMode, BM_SETCHECK,
@@ -417,18 +470,32 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         if (g_cfg.alwaysOnTop)
             SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 
-        // 系统托盘图标
+        // 系统托盘图标。用 LoadImageW 显式取小图标尺寸，
+        // 否则 Windows 会把 32x32 硬缩到 16x16，边缘发毛。
         {
             NOTIFYICONDATAW nid = {0};
+
+            g_hTrayIcon = (HICON)LoadImageW(
+                GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_APP_ICON),
+                IMAGE_ICON,
+                GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON),
+                LR_DEFAULTCOLOR);
+            if (!g_hTrayIcon) {
+                g_hTrayIcon = LoadIconW(NULL, IDI_APPLICATION);
+            }
+
             nid.cbSize = sizeof(nid);
             nid.hWnd   = hwnd;
             nid.uID    = 1;
             nid.uFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE;
             nid.uCallbackMessage = WM_TRAYICON;
-            nid.hIcon  = LoadIconW(NULL, IDI_APPLICATION);
-            wcscpy(nid.szTip, L"鲍小新写字");
+            nid.hIcon  = g_hTrayIcon;
+            wcscpy(nid.szTip, APP_TITLE);
             Shell_NotifyIconW(NIM_ADD, &nid);
         }
+
+        // 托盘图标就绪后再注册热键，失败提示才有地方可弹
+        ReportHotkeyStatus(hwnd, RegisterAppHotkeys(hwnd), FALSE);
 
         return 0;
 
@@ -468,11 +535,15 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
         // 托盘菜单命令
         if (id == IDM_TRAY_SHOW) {
-            ShowWindow(hwnd, SW_SHOW);
-            SetForegroundWindow(hwnd);
+            ShowMainWindow(hwnd);
+            return 0;
+        }
+        if (id == IDM_TRAY_RETRY_HOTKEY) {
+            ReportHotkeyStatus(hwnd, RegisterAppHotkeys(hwnd), TRUE);
             return 0;
         }
         if (id == IDM_TRAY_QUIT) {
+            g_allowExit = TRUE;   // 只有这条路径才真正退出进程
             DestroyWindow(hwnd);
             return 0;
         }
@@ -519,18 +590,47 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         return 0;
 
     case WM_TRAYICON:
+        // 左键单击或双击都打开主窗口（双击时第一下已经打开，第二下无害）
+        if (LOWORD(lParam) == WM_LBUTTONUP ||
+            LOWORD(lParam) == WM_LBUTTONDBLCLK) {
+            ShowMainWindow(hwnd);
+            return 0;
+        }
         if (LOWORD(lParam) == WM_RBUTTONUP) {
             POINT pt;
             GetCursorPos(&pt);
             HMENU hMenu = CreatePopupMenu();
             AppendMenuW(hMenu, MF_STRING, IDM_TRAY_SHOW, L"打开主窗口");
+            // 只在确实有热键被占用时才显示重试入口
+            if (!g_hotkeyStart || !g_hotkeySearch || !g_hotkeyStop) {
+                AppendMenuW(hMenu, MF_STRING, IDM_TRAY_RETRY_HOTKEY,
+                            L"重试注册热键");
+            }
             AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
             AppendMenuW(hMenu, MF_STRING, IDM_TRAY_QUIT, L"退出");
+            SetMenuDefaultItem(hMenu, IDM_TRAY_SHOW, FALSE);
             SetForegroundWindow(hwnd);
             TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, NULL);
             DestroyMenu(hMenu);
         }
         return 0;
+
+    case WM_CLOSE:
+        // 关闭按钮收回托盘而不是结束进程，否则热键会静默失效。
+        // 真正退出只走托盘菜单「退出」。
+        if (!g_allowExit) {
+            ShowWindow(hwnd, SW_HIDE);
+            if (!g_hideHintShown) {
+                g_hideHintShown = TRUE;
+                ShowTrayBalloon(hwnd, APP_NAME,
+                    L"已最小化到托盘，仍在后台运行。\n"
+                    L"左键单击托盘图标可重新打开窗口；"
+                    L"需要完全退出请右键选择「退出」。",
+                    NIIF_INFO);
+            }
+            return 0;
+        }
+        break;   // 交给 DefWindowProc 走正常销毁流程
 
     case WM_DESTROY:
         UnregisterHotKey(hwnd, HOTKEY_START);
@@ -561,6 +661,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         Db_Close(&g_dbCtx);
         Config_Save(&g_cfg, g_iniPath);
         UI_Destroy(&g_ui);
+        if (g_hTrayIcon) {
+            DestroyIcon(g_hTrayIcon);
+            g_hTrayIcon = NULL;
+        }
         PostQuitMessage(0);
         return 0;
     }
@@ -576,6 +680,21 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     (void)hPrevInstance;
     (void)lpCmdLine;
     (void)nCmdShow;
+
+    // 单实例保护。用 Local\ 前缀（会话级），多用户/远程桌面下各自独立。
+    // 重复启动时的真实意图基本是「我想看界面」，所以把已有实例的窗口
+    // 显示出来再退出，而不是简单报错。
+    g_hSingleInstance = CreateMutexW(NULL, TRUE,
+                                    L"Local\\BaoXiaoXinWriter_SingleInstance");
+    if (g_hSingleInstance && GetLastError() == ERROR_ALREADY_EXISTS) {
+        HWND existing = FindWindowW(L"KeyboardSimClass", NULL);
+        if (existing) {
+            ShowWindow(existing, IsIconic(existing) ? SW_RESTORE : SW_SHOW);
+            SetForegroundWindow(existing);
+        }
+        CloseHandle(g_hSingleInstance);
+        return 0;
+    }
 
     // 构建 INI 路径：%APPDATA%\KeyboardSim\config.ini
     wchar_t appData[MAX_PATH];
@@ -593,7 +712,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     if (g_cfg.dbPath[0] == L'\0') {
         wsprintfW(g_cfg.dbPath, L"%s\\KeyboardSim\\qa_database.db", appData);
     }
-    Db_Init(&g_dbCtx, g_cfg.dbPath);
+    // 记录失败原因和路径；此时窗口尚未创建，等用户打开题库时再提示
+    g_dbInitError = Db_Init(&g_dbCtx, g_cfg.dbPath);
+    if (g_dbInitError != DB_OK) {
+        wcsncpy(g_dbInitPath, g_cfg.dbPath, MAX_PATH - 1);
+        g_dbInitPath[MAX_PATH - 1] = L'\0';
+        OutputDebugStringW(L"启动时数据库初始化失败，已记录原始路径");
+    }
 
     // 注册窗口类
     WNDCLASSEXW wc;
@@ -605,8 +730,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     wc.hCursor       = LoadCursorW(NULL, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wc.lpszClassName = L"KeyboardSimClass";
-    wc.hIcon         = LoadIconW(NULL, IDI_APPLICATION);
-    wc.hIconSm       = LoadIconW(NULL, IDI_APPLICATION);
+    wc.hIcon         = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_APP_ICON));
+    wc.hIconSm       = (HICON)LoadImageW(
+        hInstance, MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON),
+        LR_DEFAULTCOLOR);
+    if (!wc.hIcon)   wc.hIcon   = LoadIconW(NULL, IDI_APPLICATION);
+    if (!wc.hIconSm) wc.hIconSm = wc.hIcon;
     RegisterClassExW(&wc);
 
     // 居中创建窗口
@@ -619,12 +749,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     HWND hwnd = CreateWindowExW(
         WS_EX_APPWINDOW,
         L"KeyboardSimClass",
-        L"鲍小新写字  v3.1",
+        APP_TITLE,
         WS_OVERLAPPEDWINDOW,
         x, y, winW, winH,
         NULL, NULL, hInstance, NULL);
 
-    if (!hwnd) return 1;
+    if (!hwnd) {
+        if (g_hSingleInstance) CloseHandle(g_hSingleInstance);
+        return 1;
+    }
 
     // 启动时隐藏主窗口，后台运行，通过热键或托盘菜单操作
     ShowWindow(hwnd, SW_HIDE);
@@ -636,5 +769,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         DispatchMessageW(&msg);
     }
 
+    if (g_hSingleInstance) {
+        CloseHandle(g_hSingleInstance);
+        g_hSingleInstance = NULL;
+    }
     return (int)msg.wParam;
 }

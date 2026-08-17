@@ -52,7 +52,10 @@ struct QAPair* Db_GetAllPairs(DbContext *ctx, int *count);
 void Db_FreeResults(struct QAPair *pairs, int count);
 
 // 从文本内容导入（格式：题目:题目内容 答案:答案内容）
-int Db_ImportFromText(DbContext *ctx, const wchar_t *text);
+// 题目可以包含空格；"答案:" 分隔符必须位于空白之后。
+// 返回成功导入的条数，或负的错误码。
+// skippedCount 可为 NULL；否则写回格式不正确而被跳过的非空行数。
+int Db_ImportFromText(DbContext *ctx, const wchar_t *text, int *skippedCount);
 
 // 将所有记录导出到文本（格式：题目:题目内容 答案:答案内容）
 wchar_t* Db_ExportToText(DbContext *ctx);

@@ -330,6 +330,22 @@ void UI_SetIntervalText(AppUI *ui, int delayMs)
     SetWindowTextW(ui->hwndEditInterval, buf);
 }
 
+void UI_SetHotkeyHint(AppUI *ui, BOOL okStart, BOOL okSearch, BOOL okStop)
+{
+    wchar_t hint[256];
+
+    if (!ui->hwndStaticHint) return;
+
+    wsprintfW(hint,
+              L"Ctrl+Alt+V 开始输入%s\n"
+              L"Ctrl+Alt+B 搜索答案%s\n"
+              L"Ctrl+Alt+S 停止输入%s",
+              okStart  ? L"" : L"（被占用）",
+              okSearch ? L"" : L"（被占用）",
+              okStop   ? L"" : L"（被占用）");
+    SetWindowTextW(ui->hwndStaticHint, hint);
+}
+
 void UI_SetPresetSelection(AppUI *ui, int delayMs)
 {
     if      (delayMs >= SPEED_SLOW)   SendMessageW(ui->hwndComboPreset, CB_SETCURSEL, 0, 0);

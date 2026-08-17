@@ -74,6 +74,9 @@ void UI_SetState(AppUI *ui, int state);
 void UI_UpdateProgress(AppUI *ui, int current, int total);
 void UI_SetStatus(AppUI *ui, const wchar_t *text);
 void UI_SetIntervalText(AppUI *ui, int delayMs);
+
+// 按实际注册结果刷新热键提示；被占用的热键会标注出来
+void UI_SetHotkeyHint(AppUI *ui, BOOL okStart, BOOL okSearch, BOOL okStop);
 void UI_SetPresetSelection(AppUI *ui, int delayMs);
 void UI_ApplyWindowStyling(HWND hwnd, BOOL darkMode);
 void UI_Destroy(AppUI *ui);

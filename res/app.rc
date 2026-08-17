@@ -1,3 +1,39 @@
-// res/app.rc — 嵌入 manifest 以启用视觉样式
+// res/app.rc — manifest、应用图标与版本元数据
 #include <windows.h>
+#include "resource.h"
+
+// 视觉样式与 DPI 感知
 1 RT_MANIFEST "app.manifest"
+
+// 应用图标（多尺寸，由 scripts/make_icon.py 生成）
+IDI_APP_ICON ICON "app.ico"
+
+// exe 文件属性里的版本信息。
+// 字符串保持 ASCII，避免 windres 的输入编码差异；界面文案走 resource.h 的宽字符宏。
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION    APP_VER_MAJOR, APP_VER_MINOR, 0, 0
+ PRODUCTVERSION APP_VER_MAJOR, APP_VER_MINOR, 0, 0
+ FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+ FILEFLAGS      0
+ FILEOS         VOS_NT_WINDOWS32
+ FILETYPE       VFT_APP
+ FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"    // en-US, Unicode
+        BEGIN
+            VALUE "FileDescription",  "BaoXiaoXin Writer - clipboard keyboard input tool"
+            VALUE "FileVersion",      APP_VER_STR
+            VALUE "InternalName",     "KeyboardSim"
+            VALUE "LegalCopyright",   "MIT License"
+            VALUE "OriginalFilename", "KeyboardSim.exe"
+            VALUE "ProductName",      "BaoXiaoXin Writer"
+            VALUE "ProductVersion",   APP_VER_STR
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

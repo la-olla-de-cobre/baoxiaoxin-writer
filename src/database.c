@@ -6,6 +6,7 @@
 #include <string.h>
 #include <limits.h>
 #include "database.h"
+#include "mem.h"
 
 // 辅助函数：显示错误消息
 static void ShowError(const wchar_t *msg)
@@ -22,10 +23,10 @@ static char *WideToUtf8(const wchar_t *text)
     size = WideCharToMultiByte(CP_UTF8, 0, text, -1, NULL, 0, NULL, NULL);
     if (size <= 0) return NULL;
 
-    utf8 = (char *)malloc((size_t)size);
+    utf8 = (char *)Mem_Alloc((size_t)size);
     if (!utf8) return NULL;
     if (WideCharToMultiByte(CP_UTF8, 0, text, -1, utf8, size, NULL, NULL) <= 0) {
-        free(utf8);
+        Mem_Free(utf8);
         return NULL;
     }
     return utf8;
@@ -40,10 +41,10 @@ static wchar_t *Utf8ToWide(const char *text)
     size = MultiByteToWideChar(CP_UTF8, 0, text, -1, NULL, 0);
     if (size <= 0) return NULL;
 
-    wide = (wchar_t *)malloc((size_t)size * sizeof(wchar_t));
+    wide = (wchar_t *)Mem_Alloc((size_t)size * sizeof(wchar_t));
     if (!wide) return NULL;
     if (MultiByteToWideChar(CP_UTF8, 0, text, -1, wide, size) <= 0) {
-        free(wide);
+        Mem_Free(wide);
         return NULL;
     }
     return wide;
@@ -51,7 +52,7 @@ static wchar_t *Utf8ToWide(const char *text)
 
 static wchar_t *DuplicateLower(const wchar_t *text)
 {
-    wchar_t *copy = _wcsdup(text);
+    wchar_t *copy = Mem_WcsDup(text);
     if (copy) _wcslwr(copy);
     return copy;
 }
@@ -154,8 +155,8 @@ int Db_Insert(DbContext *ctx, const wchar_t *question, const wchar_t *answer)
     char *utf8Answer = WideToUtf8(answer);
 
     if (!utf8Question || !utf8Answer) {
-        free(utf8Question);
-        free(utf8Answer);
+        Mem_Free(utf8Question);
+        Mem_Free(utf8Answer);
         OutputDebugStringW(L"文本转换失败!");
         return DB_ERROR_MEMORY;
     }
@@ -165,8 +166,8 @@ int Db_Insert(DbContext *ctx, const wchar_t *question, const wchar_t *answer)
     sqlite3_stmt *stmt;
     int result = sqlite3_prepare_v2(ctx->db, sql, -1, &stmt, NULL);
     if (result != 0) {
-        free(utf8Question);
-        free(utf8Answer);
+        Mem_Free(utf8Question);
+        Mem_Free(utf8Answer);
         OutputDebugStringW(L"SQL准备失败!");
         return DB_ERROR_EXEC;
     }
@@ -176,8 +177,8 @@ int Db_Insert(DbContext *ctx, const wchar_t *question, const wchar_t *answer)
 
     result = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    free(utf8Question);
-    free(utf8Answer);
+    Mem_Free(utf8Question);
+    Mem_Free(utf8Answer);
 
     if (result != SQLITE_DONE) {
         OutputDebugStringW(L"SQL执行失败!");
@@ -205,13 +206,13 @@ wchar_t* Db_Search(DbContext *ctx, const wchar_t *question)
     sqlite3_stmt *stmt;
     int result = sqlite3_prepare_v2(ctx->db, sql, -1, &stmt, NULL);
     if (result != 0) {
-        free(utf8Question);
+        Mem_Free(utf8Question);
         OutputDebugStringW(L"SQL准备失败!");
         return NULL;
     }
 
     sqlite3_bind_text(stmt, 1, utf8Question, -1, SQLITE_TRANSIENT);
-    free(utf8Question);
+    Mem_Free(utf8Question);
 
     result = sqlite3_step(stmt);
     if (result != SQLITE_ROW) {
@@ -271,14 +272,14 @@ wchar_t* Db_SearchFuzzy(DbContext *ctx, const wchar_t *question)
             double score = (double)wcslen(question) / (double)wcslen(pairs[i].question);
             if (score > bestScore) {
                 bestScore = score;
-                if (bestAnswer) free(bestAnswer);
-                bestAnswer = _wcsdup(pairs[i].answer);
+                if (bestAnswer) Mem_Free(bestAnswer);
+                bestAnswer = Mem_WcsDup(pairs[i].answer);
             }
         }
-        free(stored);
+        Mem_Free(stored);
     }
 
-    free(qLower);
+    Mem_Free(qLower);
     Db_FreeResults(pairs, count);
     return bestAnswer;
 }
@@ -298,12 +299,12 @@ int Db_Delete(DbContext *ctx, const wchar_t *question)
     sqlite3_stmt *stmt;
     int result = sqlite3_prepare_v2(ctx->db, sql, -1, &stmt, NULL);
     if (result != 0) {
-        free(utf8Question);
+        Mem_Free(utf8Question);
         return DB_ERROR_EXEC;
     }
 
     sqlite3_bind_text(stmt, 1, utf8Question, -1, SQLITE_TRANSIENT);
-    free(utf8Question);
+    Mem_Free(utf8Question);
 
     result = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
@@ -332,7 +333,7 @@ struct QAPair* Db_GetAllPairs(DbContext *ctx, int *count)
 
     size_t capacity = 16;
     int rowCount = 0;
-    struct QAPair *pairs = (struct QAPair *)malloc(capacity * sizeof(struct QAPair));
+    struct QAPair *pairs = (struct QAPair *)Mem_Alloc(capacity * sizeof(struct QAPair));
     if (!pairs) {
         sqlite3_finalize(stmt);
         return NULL;
@@ -351,7 +352,7 @@ struct QAPair* Db_GetAllPairs(DbContext *ctx, int *count)
                 return NULL;
             }
             capacity *= 2;
-            struct QAPair *resized = (struct QAPair *)realloc(
+            struct QAPair *resized = (struct QAPair *)Mem_Realloc(
                 pairs, capacity * sizeof(struct QAPair));
             if (!resized) {
                 sqlite3_finalize(stmt);
@@ -367,8 +368,8 @@ struct QAPair* Db_GetAllPairs(DbContext *ctx, int *count)
         wchar_t *answer = Utf8ToWide((const char *)utf8Answer);
 
         if (!question || !answer) {
-            free(question);
-            free(answer);
+            Mem_Free(question);
+            Mem_Free(answer);
             sqlite3_finalize(stmt);
             Db_FreeResults(pairs, rowCount);
             return NULL;
@@ -385,7 +386,7 @@ struct QAPair* Db_GetAllPairs(DbContext *ctx, int *count)
         return NULL;
     }
     if (rowCount == 0) {
-        free(pairs);
+        Mem_Free(pairs);
         return NULL;
     }
 
@@ -398,27 +399,47 @@ void Db_FreeResults(struct QAPair *pairs, int count)
     if (!pairs) return;
 
     for (int i = 0; i < count; i++) {
-        if (pairs[i].question) free(pairs[i].question);
-        if (pairs[i].answer) free(pairs[i].answer);
+        if (pairs[i].question) Mem_Free(pairs[i].question);
+        if (pairs[i].answer) Mem_Free(pairs[i].answer);
     }
-    free(pairs);
+    Mem_Free(pairs);
 }
 
-int Db_ImportFromText(DbContext *ctx, const wchar_t *text)
+// 在一行中定位真正的 "答案:" 分隔符。分隔符必须位于空白之后，
+// 因此题目内部出现的字面量 "答案:" 不会被误当作分隔符。
+static wchar_t *FindAnswerMarker(wchar_t *questionStart)
 {
+    wchar_t *scan = questionStart;
+
+    while ((scan = wcsstr(scan, L"答案:")) != NULL) {
+        if (scan > questionStart &&
+            (*(scan - 1) == L' ' || *(scan - 1) == L'\t')) {
+            return scan;
+        }
+        scan += 3;
+    }
+    return NULL;
+}
+
+int Db_ImportFromText(DbContext *ctx, const wchar_t *text, int *skippedCount)
+{
+    if (skippedCount) {
+        *skippedCount = 0;
+    }
     if (!ctx->db) {
         return DB_ERROR_OPEN;
     }
 
     int importedCount = 0;
+    int skipped = 0;
     BOOL failed = FALSE;
-    wchar_t *line = _wcsdup(text);
+    wchar_t *line = Mem_WcsDup(text);
     if (!line) {
         return DB_ERROR_MEMORY;
     }
 
     if (sqlite3_exec(ctx->db, "BEGIN IMMEDIATE;", NULL, NULL, NULL) != SQLITE_OK) {
-        free(line);
+        Mem_Free(line);
         return DB_ERROR_EXEC;
     }
 
@@ -441,31 +462,35 @@ int Db_ImportFromText(DbContext *ctx, const wchar_t *text)
 
         if (*trimmed) {
             // 解析格式：题目:题目内容 答案:答案内容
+            // 题目内容可以包含空格，一直延伸到 "答案:" 分隔符为止。
             wchar_t *qMark = wcsstr(trimmed, L"题目:");
-            wchar_t *aMark = wcsstr(trimmed, L"答案:");
+            wchar_t *question = qMark ? qMark + 3 : NULL; // 跳过"题目:"
+            wchar_t *aMark = question ? FindAnswerMarker(question) : NULL;
 
-            if (qMark && aMark && qMark < aMark) {
-                wchar_t *question = qMark + 3; // 跳过"题目:"
-                wchar_t *answer = aMark + 3;  // 跳过"答案:"
+            if (aMark) {
+                wchar_t *answer = aMark + 3; // 跳过"答案:"
+                wchar_t *qEnd = aMark;
 
-                // 找到题目和答案之间的空格分割
-                wchar_t *space = question;
-                while (*space && space < aMark) {
-                    if (*space == L' ' || *space == L'\t') {
-                        *space = L'\0';
-                        // 跳过多余的空格
-                        while (*(space + 1) == L' ' || *(space + 1) == L'\t') space++;
-                        if (wcslen(question) > 0 && wcslen(answer) > 0) {
-                            if (Db_Insert(ctx, question, answer) == DB_OK) {
-                                importedCount++;
-                            } else {
-                                failed = TRUE;
-                            }
-                        }
-                        break;
-                    }
-                    space++;
+                // 题目取到分隔符之前，并去掉尾部空白
+                while (qEnd > question &&
+                       (*(qEnd - 1) == L' ' || *(qEnd - 1) == L'\t')) {
+                    --qEnd;
                 }
+                *qEnd = L'\0';
+
+                while (*answer == L' ' || *answer == L'\t') ++answer;
+
+                if (*question && *answer) {
+                    if (Db_Insert(ctx, question, answer) == DB_OK) {
+                        importedCount++;
+                    } else {
+                        failed = TRUE;
+                    }
+                } else {
+                    skipped++;
+                }
+            } else {
+                skipped++;
             }
         }
 
@@ -473,7 +498,7 @@ int Db_ImportFromText(DbContext *ctx, const wchar_t *text)
         p = next + 1;
     }
 
-    free(line);
+    Mem_Free(line);
     if (failed) {
         sqlite3_exec(ctx->db, "ROLLBACK;", NULL, NULL, NULL);
         return DB_ERROR_EXEC;
@@ -481,6 +506,9 @@ int Db_ImportFromText(DbContext *ctx, const wchar_t *text)
     if (sqlite3_exec(ctx->db, "COMMIT;", NULL, NULL, NULL) != SQLITE_OK) {
         sqlite3_exec(ctx->db, "ROLLBACK;", NULL, NULL, NULL);
         return DB_ERROR_EXEC;
+    }
+    if (skippedCount) {
+        *skippedCount = skipped;
     }
     return importedCount;
 }
@@ -504,7 +532,7 @@ wchar_t* Db_ExportToText(DbContext *ctx)
     }
     totalLen += 1; // 结束符
 
-    wchar_t *text = (wchar_t *)malloc(totalLen * sizeof(wchar_t));
+    wchar_t *text = (wchar_t *)Mem_Alloc(totalLen * sizeof(wchar_t));
     if (!text) {
         Db_FreeResults(pairs, count);
         return NULL;

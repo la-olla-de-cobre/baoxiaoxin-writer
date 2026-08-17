@@ -1,5 +1,6 @@
 #include "worker.h"
 #include "resource.h"
+#include "mem.h"
 #include <process.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -77,44 +78,6 @@ static BOOL SendChar(wchar_t ch)
     }
 
     return SendUnicodeChar(ch);
-}
-
-static BOOL IsHashCommentStart(const wchar_t *text, int index, int textLen)
-{
-    int start = index;
-    wchar_t word[16];
-    int length = 0;
-
-    while (start > 0 && (text[start - 1] == L' ' || text[start - 1] == L'\t')) {
-        --start;
-    }
-    if (start > 0 && text[start - 1] != L'\n' && text[start - 1] != L'\r') {
-        return FALSE;
-    }
-
-    ++index;
-    while (index < textLen &&
-           ((text[index] >= L'a' && text[index] <= L'z') ||
-            (text[index] >= L'A' && text[index] <= L'Z'))) {
-        if (length < (int)(sizeof(word) / sizeof(word[0])) - 1) {
-            word[length++] = text[index];
-        }
-        ++index;
-    }
-    word[length] = L'\0';
-
-    return wcscmp(word, L"include") != 0 &&
-           wcscmp(word, L"define") != 0 &&
-           wcscmp(word, L"if") != 0 &&
-           wcscmp(word, L"ifdef") != 0 &&
-           wcscmp(word, L"ifndef") != 0 &&
-           wcscmp(word, L"elif") != 0 &&
-           wcscmp(word, L"else") != 0 &&
-           wcscmp(word, L"endif") != 0 &&
-           wcscmp(word, L"pragma") != 0 &&
-           wcscmp(word, L"error") != 0 &&
-           wcscmp(word, L"line") != 0 &&
-           wcscmp(word, L"undef") != 0;
 }
 
 static int GetLineIndentUnits(const wchar_t *text, int index)
@@ -209,12 +172,6 @@ static BOOL SimulateTyping(WorkerParams *params)
 {
     int i;
     BOOL atLineStart = FALSE;
-    const BOOL skipComments = FALSE;
-    BOOL inString = FALSE;
-    BOOL inChar = FALSE;
-    BOOL escaped = FALSE;
-    BOOL inLineComment = FALSE;
-    BOOL inBlockComment = FALSE;
     int pythonStructuralIndent = 0;
 
     if (WaitForSingleObject(params->hEventStop, START_DELAY_MS) == WAIT_OBJECT_0) {
@@ -249,50 +206,6 @@ static BOOL SimulateTyping(WorkerParams *params)
                          (WPARAM)i, (LPARAM)params->textLen);
             --i;
             continue;
-        }
-
-        if (skipComments && params->codeInputMode) {
-            wchar_t next = (i + 1 < params->textLen) ? params->text[i + 1] : L'\0';
-
-            if (inLineComment) {
-                if (ch != L'\r' && ch != L'\n') {
-                    PostMessageW(params->hwndMain, WM_WORKER_PROGRESS,
-                                 (WPARAM)(i + 1), (LPARAM)params->textLen);
-                    continue;
-                }
-                inLineComment = FALSE;
-            } else if (inBlockComment) {
-                if (ch == L'*' && next == L'/') {
-                    ++i;
-                    PostMessageW(params->hwndMain, WM_WORKER_PROGRESS,
-                                 (WPARAM)(i + 1), (LPARAM)params->textLen);
-                    inBlockComment = FALSE;
-                    continue;
-                }
-                if (ch != L'\r' && ch != L'\n') {
-                    PostMessageW(params->hwndMain, WM_WORKER_PROGRESS,
-                                 (WPARAM)(i + 1), (LPARAM)params->textLen);
-                    continue;
-                }
-            } else if (!inString && !inChar && ch == L'/' && next == L'/') {
-                ++i;
-                inLineComment = TRUE;
-                PostMessageW(params->hwndMain, WM_WORKER_PROGRESS,
-                             (WPARAM)(i + 1), (LPARAM)params->textLen);
-                continue;
-            } else if (!inString && !inChar && ch == L'/' && next == L'*') {
-                ++i;
-                inBlockComment = TRUE;
-                PostMessageW(params->hwndMain, WM_WORKER_PROGRESS,
-                             (WPARAM)(i + 1), (LPARAM)params->textLen);
-                continue;
-            } else if (!inString && !inChar && ch == L'#' &&
-                       IsHashCommentStart(params->text, i, params->textLen)) {
-                inLineComment = TRUE;
-                PostMessageW(params->hwndMain, WM_WORKER_PROGRESS,
-                             (WPARAM)(i + 1), (LPARAM)params->textLen);
-                continue;
-            }
         }
 
         // 暂停时阻塞在这里；继续时事件会恢复为 signaled。
@@ -348,24 +261,6 @@ static BOOL SimulateTyping(WorkerParams *params)
                     }
                     --backspaces;
                 }
-            }
-        }
-
-        if (params->codeInputMode && !inLineComment && !inBlockComment) {
-            if (inString || inChar) {
-                if (escaped) {
-                    escaped = FALSE;
-                } else if (ch == L'\\') {
-                    escaped = TRUE;
-                } else if ((inString && ch == L'"') ||
-                           (inChar && ch == L'\'')) {
-                    inString = FALSE;
-                    inChar = FALSE;
-                }
-            } else if (ch == L'"') {
-                inString = TRUE;
-            } else if (ch == L'\'') {
-                inChar = TRUE;
             }
         }
 
@@ -480,9 +375,9 @@ void Worker_Free(WorkerParams *params)
         params->hEventStop = NULL;
     }
     if (params->text) {
-        HeapFree(GetProcessHeap(), 0, params->text);
+        Mem_Free(params->text);
         params->text = NULL;
     }
 
-    HeapFree(GetProcessHeap(), 0, params);
+    Mem_Free(params);
 }

@@ -1,5 +1,21 @@
 #pragma once
 
+// ── 应用标识与版本（唯一来源）────────────────────────────
+// 窗口标题、托盘提示、关于信息与 exe 版本元数据全部从这里取，
+// 发版时只改这一处。
+#define APP_VER_MAJOR   5
+#define APP_VER_MINOR   2
+#define APP_VER_STR     "5.2.0.0"          // 供 res/app.rc 的 VERSIONINFO 使用
+
+#ifdef _UNICODE
+#define APP_NAME        L"鲍小新写字"
+#define APP_VERSION     L"5.2"
+#define APP_TITLE       APP_NAME L"  v" APP_VERSION
+#endif
+
+// ── 图标资源 ─────────────────────────────────────────────
+#define IDI_APP_ICON        201
+
 // ── 控件 ID ──────────────────────────────────────────────
 #define IDC_EDIT_TEXT       1001
 #define IDC_BTN_LOAD        1002
@@ -60,8 +76,9 @@
 #define WM_TRAYICON         (WM_USER + 3)
 
 // ── 托盘图标命令 ────────────────────────────────────────
-#define IDM_TRAY_SHOW       2001
-#define IDM_TRAY_QUIT       2002
+#define IDM_TRAY_SHOW           2001
+#define IDM_TRAY_QUIT           2002
+#define IDM_TRAY_RETRY_HOTKEY   2003  // 热键被占用时重新注册
 
 // ── 应用状态机 ───────────────────────────────────────────
 #define STATE_IDLE      0   // 空闲

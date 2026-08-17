@@ -5,6 +5,8 @@
 #include <wchar.h>
 #include <string.h>
 #include "qa_ui.h"
+#include "mem.h"
+#include "textfile.h"
 #include "database.h"
 #include "resource.h"
 #include "ui.h"
@@ -27,79 +29,6 @@ static HWND g_hwndQAManager = NULL;
 #define CTRL_ID_STATIC_STATUS    1011
 #define CTRL_ID_BTN_REFRESH      1012
 #define CTRL_ID_BTN_EXPORT       1013
-
-static wchar_t *LoadTextFile(const wchar_t *filePath)
-{
-    HANDLE hFile;
-    DWORD fileSize, bytesRead = 0;
-    BYTE *bytes;
-    wchar_t *text;
-    int chars;
-    DWORD offset = 0;
-
-    hFile = CreateFileW(filePath, GENERIC_READ, FILE_SHARE_READ, NULL,
-                        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hFile == INVALID_HANDLE_VALUE) return NULL;
-
-    fileSize = GetFileSize(hFile, NULL);
-    if (fileSize == INVALID_FILE_SIZE || fileSize == 0) {
-        CloseHandle(hFile);
-        return NULL;
-    }
-
-    bytes = (BYTE *)malloc(fileSize);
-    if (!bytes) {
-        CloseHandle(hFile);
-        return NULL;
-    }
-    if (!ReadFile(hFile, bytes, fileSize, &bytesRead, NULL) || bytesRead != fileSize) {
-        CloseHandle(hFile);
-        free(bytes);
-        return NULL;
-    }
-    CloseHandle(hFile);
-
-    if (fileSize >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE) {
-        offset = 2;
-        if ((fileSize - offset) % sizeof(wchar_t) != 0) {
-            free(bytes);
-            return NULL;
-        }
-        chars = (int)((fileSize - offset) / sizeof(wchar_t));
-        text = (wchar_t *)malloc((size_t)(chars + 1) * sizeof(wchar_t));
-        if (text) {
-            memcpy(text, bytes + offset, (size_t)chars * sizeof(wchar_t));
-            text[chars] = L'\0';
-        }
-    } else if (fileSize >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF) {
-        offset = 2;
-        if ((fileSize - offset) % 2 != 0) {
-            free(bytes);
-            return NULL;
-        }
-        chars = (int)((fileSize - offset) / 2);
-        text = (wchar_t *)malloc((size_t)(chars + 1) * sizeof(wchar_t));
-        if (text) {
-            for (int i = 0; i < chars; ++i) {
-                text[i] = (wchar_t)((bytes[offset + i * 2] << 8) | bytes[offset + i * 2 + 1]);
-            }
-            text[chars] = L'\0';
-        }
-    } else {
-        if (fileSize >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) offset = 3;
-        chars = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
-                                    (const char *)(bytes + offset), (int)(fileSize - offset), NULL, 0);
-        text = chars > 0 ? (wchar_t *)malloc((size_t)(chars + 1) * sizeof(wchar_t)) : NULL;
-        if (text) {
-            MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
-                                (const char *)(bytes + offset), (int)(fileSize - offset), text, chars);
-            text[chars] = L'\0';
-        }
-    }
-
-    free(bytes);
-    return text;
-}
 
 // ── 对话框消息处理 ───────────────────────────────────────
 static LRESULT CALLBACK DlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -256,11 +185,11 @@ static LRESULT CALLBACK DlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             int aLen = GetWindowTextLengthW(GetDlgItem(hwnd, CTRL_ID_EDIT_ANSWER));
 
             if (qLen > 0 && aLen > 0) {
-                wchar_t *question = (wchar_t *)malloc((qLen + 1) * sizeof(wchar_t));
-                wchar_t *answer = (wchar_t *)malloc((aLen + 1) * sizeof(wchar_t));
+                wchar_t *question = (wchar_t *)Mem_Alloc((qLen + 1) * sizeof(wchar_t));
+                wchar_t *answer = (wchar_t *)Mem_Alloc((aLen + 1) * sizeof(wchar_t));
                 if (!question || !answer) {
-                    free(question);
-                    free(answer);
+                    Mem_Free(question);
+                    Mem_Free(answer);
                     SetDlgItemTextW(hwnd, CTRL_ID_STATIC_STATUS, L"内存不足，无法添加题目！");
                     break;
                 }
@@ -276,8 +205,8 @@ static LRESULT CALLBACK DlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     SetDlgItemTextW(hwnd, CTRL_ID_STATIC_STATUS, L"添加失败！");
                 }
 
-                free(question);
-                free(answer);
+                Mem_Free(question);
+                Mem_Free(answer);
             } else {
                 SetDlgItemTextW(hwnd, CTRL_ID_STATIC_STATUS, L"请输入题目和答案！");
             }
@@ -342,7 +271,7 @@ BOOL QAManagerUI_Create(HWND hwndParent, AppUI *pMainUI, DbContext *pDbCtx,
         return TRUE;
     }
 
-    QAManagerUI *pUI = (QAManagerUI *)malloc(sizeof(QAManagerUI));
+    QAManagerUI *pUI = (QAManagerUI *)Mem_Alloc(sizeof(QAManagerUI));
     if (!pUI) return FALSE;
 
     ZeroMemory(pUI, sizeof(QAManagerUI));
@@ -362,7 +291,7 @@ BOOL QAManagerUI_Create(HWND hwndParent, AppUI *pMainUI, DbContext *pDbCtx,
         if (pUI->hbrBg) DeleteObject(pUI->hbrBg);
         if (pUI->hbrPanel) DeleteObject(pUI->hbrPanel);
         if (pUI->hbrEdit) DeleteObject(pUI->hbrEdit);
-        free(pUI);
+        Mem_Free(pUI);
         return FALSE;
     }
 
@@ -399,7 +328,7 @@ BOOL QAManagerUI_Create(HWND hwndParent, AppUI *pMainUI, DbContext *pDbCtx,
         DeleteObject(pUI->hbrBg);
         DeleteObject(pUI->hbrPanel);
         DeleteObject(pUI->hbrEdit);
-        free(pUI);
+        Mem_Free(pUI);
         return FALSE;
     }
 
@@ -419,7 +348,7 @@ BOOL QAManagerUI_Create(HWND hwndParent, AppUI *pMainUI, DbContext *pDbCtx,
     if (pUI->hbrBg) DeleteObject(pUI->hbrBg);
     if (pUI->hbrPanel) DeleteObject(pUI->hbrPanel);
     if (pUI->hbrEdit) DeleteObject(pUI->hbrEdit);
-    free(pUI);
+    Mem_Free(pUI);
 
     return TRUE;
 }
@@ -460,7 +389,7 @@ void QAManagerUI_UpdateList(QAManagerUI *pUI)
             SetDlgItemTextW(pUI->hwndDlg, CTRL_ID_STATIC_STATUS, L"题库内容过长，无法显示！");
             return;
         }
-        item = (wchar_t *)malloc(itemChars * sizeof(wchar_t));
+        item = (wchar_t *)Mem_Alloc(itemChars * sizeof(wchar_t));
         if (!item) {
             Db_FreeResults(pairs, count);
             SetDlgItemTextW(pUI->hwndDlg, CTRL_ID_STATIC_STATUS, L"内存不足，无法显示题库！");
@@ -468,14 +397,14 @@ void QAManagerUI_UpdateList(QAManagerUI *pUI)
         }
         if (_snwprintf(item, itemChars, L"[%d] 题目：%ls | 答案：%ls",
                        i + 1, pairs[i].question, pairs[i].answer) < 0) {
-            free(item);
+            Mem_Free(item);
             Db_FreeResults(pairs, count);
             SetDlgItemTextW(pUI->hwndDlg, CTRL_ID_STATIC_STATUS, L"题库内容格式化失败！");
             return;
         }
         item[itemChars - 1] = L'\0';
         SendMessageW(hwndList, LB_ADDSTRING, 0, (LPARAM)item);
-        free(item);
+        Mem_Free(item);
     }
 
     Db_FreeResults(pairs, count);
@@ -499,19 +428,26 @@ BOOL QAManagerUI_ImportFile(QAManagerUI *pUI)
 
     if (!GetOpenFileNameW(&ofn)) return FALSE;
 
-    wchar_t *text = LoadTextFile(filePath);
+    TextFileStatus status = TEXTFILE_OK;
+    wchar_t *text = TextFile_Load(filePath, &status);
     if (!text) {
         SetDlgItemTextW(pUI->hwndDlg, CTRL_ID_STATIC_STATUS,
-                        L"无法读取文件，需为有效的 UTF-8 或 UTF-16 文本！");
+                        TextFile_StatusText(status));
         return FALSE;
     }
 
-    int imported = Db_ImportFromText(pUI->pDbCtx, text);
-    free(text);
+    int skipped = 0;
+    int imported = Db_ImportFromText(pUI->pDbCtx, text, &skipped);
+    Mem_Free(text);
 
     if (imported > 0) {
         wchar_t status[128];
-        wsprintfW(status, L"成功导入 %d 条记录！", imported);
+        if (skipped > 0) {
+            wsprintfW(status, L"成功导入 %d 条记录，%d 行格式不正确已跳过！",
+                      imported, skipped);
+        } else {
+            wsprintfW(status, L"成功导入 %d 条记录！", imported);
+        }
         SetDlgItemTextW(pUI->hwndDlg, CTRL_ID_STATIC_STATUS, status);
         QAManagerUI_UpdateList(pUI);
     } else {
@@ -546,7 +482,7 @@ BOOL QAManagerUI_ExportFile(QAManagerUI *pUI)
 
     size_t textChars = wcslen(text);
     if (textChars > MAXDWORD / sizeof(wchar_t)) {
-        free(text);
+        Mem_Free(text);
         SetDlgItemTextW(pUI->hwndDlg, CTRL_ID_STATIC_STATUS, L"题库过大，无法导出！");
         return FALSE;
     }
@@ -555,7 +491,7 @@ BOOL QAManagerUI_ExportFile(QAManagerUI *pUI)
     HANDLE hFile = CreateFileW(filePath, GENERIC_WRITE, FILE_SHARE_READ,
                                NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE) {
-        free(text);
+        Mem_Free(text);
         SetDlgItemTextW(pUI->hwndDlg, CTRL_ID_STATIC_STATUS, L"无法打开文件！");
         return FALSE;
     }
@@ -567,21 +503,21 @@ BOOL QAManagerUI_ExportFile(QAManagerUI *pUI)
         !WriteFile(hFile, text, (DWORD)textBytes, &bytesWritten, NULL) ||
         bytesWritten != (DWORD)textBytes) {
         CloseHandle(hFile);
-        free(text);
+        Mem_Free(text);
         SetDlgItemTextW(pUI->hwndDlg, CTRL_ID_STATIC_STATUS, L"写入文件失败！");
         return FALSE;
     }
     CloseHandle(hFile);
-    free(text);
+    Mem_Free(text);
 
     size_t statusChars = wcslen(filePath) + 32;
-    wchar_t *status = (wchar_t *)malloc(statusChars * sizeof(wchar_t));
+    wchar_t *status = (wchar_t *)Mem_Alloc(statusChars * sizeof(wchar_t));
     if (status) {
         if (_snwprintf(status, statusChars, L"成功导出到文件：%ls！", filePath) >= 0) {
             status[statusChars - 1] = L'\0';
             SetDlgItemTextW(pUI->hwndDlg, CTRL_ID_STATIC_STATUS, status);
         }
-        free(status);
+        Mem_Free(status);
     } else {
         SetDlgItemTextW(pUI->hwndDlg, CTRL_ID_STATIC_STATUS, L"导出成功！");
     }
