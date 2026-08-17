@@ -112,8 +112,9 @@ void UI_ResizeToScaled(HWND hwnd, AppUI *ui, int logicalW, int logicalH);
 void UI_SetDarkMode(AppUI *ui, BOOL dark);
 
 // WndProc 转发
-// 绘制窗口背景：底色 + 两块圆角卡片 + 分组分隔线
-LRESULT UI_OnEraseBkgnd(AppUI *ui, HDC hdc);
+// 绘制窗口背景：底色 + 两块圆角卡片 + 分组分隔线。
+// 内部走离屏位图再一次性 BitBlt，避免「先刷底色再画卡片」的可见两步闪烁。
+void UI_PaintBackground(AppUI *ui, HDC hdcTarget);
 LRESULT UI_OnDrawItem(AppUI *ui, WPARAM wParam, LPARAM lParam);
 LRESULT UI_OnCtlColor(AppUI *ui, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 void    UI_OnMouseMove(AppUI *ui, HWND hwndBtn);

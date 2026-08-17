@@ -420,19 +420,18 @@ static void FillRoundedCard(HDC hdc, const RECT *rc, int radius,
     DeleteObject(rgn);
 }
 
-LRESULT UI_OnEraseBkgnd(AppUI *ui, HDC hdc)
+// 把底色、卡片、分隔线画到给定 DC 上（不含双缓冲）
+static void DrawBackgroundInto(AppUI *ui, HDC hdc, const RECT *rcClient)
 {
-    RECT rcClient;
     COLORREF border = ui->darkMode ? CLR_BORDER : CLR_BORDER_LIGHT;
     int radius = UI_Scale(ui, CARD_RADIUS);
 
-    GetClientRect(ui->hwndMain, &rcClient);
-    FillRect(hdc, &rcClient, ui->hbrBg);
+    FillRect(hdc, rcClient, ui->hbrBg);
 
-    // 卡片尺寸尚未算出（首次 WM_ERASEBKGND 早于 WM_SIZE）就只铺底色
-    if (ui->rcCardPanel.right <= ui->rcCardPanel.left) return 1;
+    // 卡片尺寸尚未算出（首次绘制早于 WM_SIZE）就只铺底色
+    if (ui->rcCardPanel.right <= ui->rcCardPanel.left) return;
 
-    FillRoundedCard(hdc, &ui->rcCardText,  radius, ui->hbrEdit,   border);
+    FillRoundedCard(hdc, &ui->rcCardText,  radius, ui->hbrEdit,  border);
     FillRoundedCard(hdc, &ui->rcCardPanel, radius, ui->hbrPanel, border);
 
     // 面板内的分组分隔线
@@ -456,7 +455,37 @@ LRESULT UI_OnEraseBkgnd(AppUI *ui, HDC hdc)
             DeleteObject(hbrSep);
         }
     }
-    return 1;
+}
+
+void UI_PaintBackground(AppUI *ui, HDC hdcTarget)
+{
+    RECT rcClient;
+    HDC     memDC;
+    HBITMAP memBmp, oldBmp;
+
+    GetClientRect(ui->hwndMain, &rcClient);
+    if (rcClient.right <= 0 || rcClient.bottom <= 0) return;
+
+    // 离屏画好再整块拷过去：否则「刷底色」和「画卡片」两步都会被看到
+    memDC = CreateCompatibleDC(hdcTarget);
+    if (!memDC) {
+        DrawBackgroundInto(ui, hdcTarget, &rcClient);
+        return;
+    }
+    memBmp = CreateCompatibleBitmap(hdcTarget, rcClient.right, rcClient.bottom);
+    if (!memBmp) {
+        DeleteDC(memDC);
+        DrawBackgroundInto(ui, hdcTarget, &rcClient);
+        return;
+    }
+
+    oldBmp = (HBITMAP)SelectObject(memDC, memBmp);
+    DrawBackgroundInto(ui, memDC, &rcClient);
+    BitBlt(hdcTarget, 0, 0, rcClient.right, rcClient.bottom, memDC, 0, 0, SRCCOPY);
+
+    SelectObject(memDC, oldBmp);
+    DeleteObject(memBmp);
+    DeleteDC(memDC);
 }
 
 // ── DPI 变化与窗口尺寸 ───────────────────────────────────

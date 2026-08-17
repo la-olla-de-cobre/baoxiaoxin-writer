@@ -128,6 +128,14 @@ static void ReportHotkeyStatus(HWND hwnd, int failed, BOOL isRetry)
         if (isRetry) {
             ShowTrayBalloon(hwnd, APP_NAME,
                             L"三个热键已全部注册成功。", NIIF_INFO);
+        } else {
+            // 启动时主窗口是隐藏的，没有任何反馈用户无法判断是否启动成功，
+            // 所以即便一切正常也要给一条确认提示。
+            ShowTrayBalloon(hwnd, APP_NAME,
+                L"已在后台运行，主窗口未打开是正常的。\n"
+                L"Ctrl+Alt+V 开始输入，Ctrl+Alt+S 停止。\n"
+                L"左键单击此托盘图标可打开主窗口。",
+                NIIF_INFO);
         }
         return;
     }
@@ -516,7 +524,17 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         return 0;
 
     case WM_ERASEBKGND:
-        return UI_OnEraseBkgnd(&g_ui, (HDC)wParam);
+        // 声明「已擦除」但什么都不画：真正的绘制在 WM_PAINT 里双缓冲完成。
+        // 若在这里刷底色，会和随后画的卡片形成可见的两步闪烁。
+        return 1;
+
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+        if (hdc) UI_PaintBackground(&g_ui, hdc);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
 
     case WM_DRAWITEM:
         return UI_OnDrawItem(&g_ui, wParam, lParam);
@@ -527,8 +545,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         return UI_OnCtlColor(&g_ui, hwnd, msg, wParam, lParam);
 
     case WM_SIZE:
+        // 注意：这里不要再调 UI_ApplyWindowStyling。它会 LoadLibrary(dwmapi)
+        // 并重设 DWM 属性，每次尺寸变化都做一遍会让窗口边框重绘闪烁。
+        // 窗口样式只需在创建时和切换深色模式时套用一次。
         UI_Layout(&g_ui, LOWORD(lParam), HIWORD(lParam));
-        UI_ApplyWindowStyling(hwnd, g_cfg.darkMode);
         return 0;
 
     case WM_DPICHANGED:
@@ -780,8 +800,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     int x = (screenW - winW) / 2;
     int y = (screenH - winH) / 2;
 
+    // WS_EX_COMPOSITED：让 Windows 对整个子控件层次做双缓冲。
+    // 布局一次要移动十几个控件，各自重绘会造成明显闪烁，这是标准解法。
     HWND hwnd = CreateWindowExW(
-        WS_EX_APPWINDOW,
+        WS_EX_APPWINDOW | WS_EX_COMPOSITED,
         L"KeyboardSimClass",
         APP_TITLE,
         WS_OVERLAPPEDWINDOW,
