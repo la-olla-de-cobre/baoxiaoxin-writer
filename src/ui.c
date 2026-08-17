@@ -365,7 +365,7 @@ void UI_Layout(AppUI *ui, int cx, int cy)
 
         // 组 4：热键提示与计数，贴卡片底部
         {
-            int hintH  = UI_Scale(ui, 60);
+            int hintH  = UI_Scale(ui, 78);
             int blockH = hintH + labelH;
             int by = ui->rcCardPanel.bottom - inner - blockH;
             if (by < y) by = y;
@@ -400,8 +400,8 @@ void UI_Layout(AppUI *ui, int cx, int cy)
 
 // ── 背景绘制：底色 + 圆角卡片 + 分组分隔线 ───────────────
 
-static void FillRoundedCard(HDC hdc, const RECT *rc, int radius,
-                            HBRUSH fill, COLORREF border)
+void UI_DrawCard(HDC hdc, const RECT *rc, int radius,
+                 HBRUSH fill, COLORREF border)
 {
     HRGN rgn = CreateRoundRectRgn(rc->left, rc->top, rc->right, rc->bottom,
                                   radius * 2, radius * 2);
@@ -431,8 +431,8 @@ static void DrawBackgroundInto(AppUI *ui, HDC hdc, const RECT *rcClient)
     // 卡片尺寸尚未算出（首次绘制早于 WM_SIZE）就只铺底色
     if (ui->rcCardPanel.right <= ui->rcCardPanel.left) return;
 
-    FillRoundedCard(hdc, &ui->rcCardText,  radius, ui->hbrEdit,  border);
-    FillRoundedCard(hdc, &ui->rcCardPanel, radius, ui->hbrPanel, border);
+    UI_DrawCard(hdc, &ui->rcCardText,  radius, ui->hbrEdit,  border);
+    UI_DrawCard(hdc, &ui->rcCardPanel, radius, ui->hbrPanel, border);
 
     // 面板内的分组分隔线
     {
@@ -560,6 +560,83 @@ void UI_ResizeToScaled(HWND hwnd, AppUI *ui, int logicalW, int logicalH)
     }
 }
 
+// ── 滑杆自绘 ─────────────────────────────────────────────
+// 滑道由系统主题绘制，深色下是亮白的，而且没有可用的深色主题类
+// （DarkMode_Explorer 对滑杆无效）。所以走 NM_CUSTOMDRAW 自己画：
+// 滑道画成两段（已选部分用强调色），滑块画成圆角块。
+
+LRESULT UI_OnTrackbarCustomDraw(AppUI *ui, LPARAM lParam)
+{
+    LPNMCUSTOMDRAW nmcd = (LPNMCUSTOMDRAW)lParam;
+
+    if (nmcd->hdr.hwndFrom != ui->hwndTrackbar) {
+        return CDRF_DODEFAULT;
+    }
+
+    switch (nmcd->dwDrawStage) {
+    case CDDS_PREPAINT:
+        return CDRF_NOTIFYITEMDRAW;
+
+    case CDDS_ITEMPREPAINT:
+        if (nmcd->dwItemSpec == TBCD_CHANNEL) {
+            RECT rc = nmcd->rc;
+            int  pos = (int)SendMessageW(ui->hwndTrackbar, TBM_GETPOS, 0, 0);
+            int  lo  = (int)SendMessageW(ui->hwndTrackbar, TBM_GETRANGEMIN, 0, 0);
+            int  hi  = (int)SendMessageW(ui->hwndTrackbar, TBM_GETRANGEMAX, 0, 0);
+            int  h   = UI_Scale(ui, 4);
+            int  mid = (rc.top + rc.bottom) / 2;
+            HBRUSH hbrTrack, hbrDone;
+            RECT rcTrack, rcDone;
+
+            rcTrack.left   = rc.left;
+            rcTrack.right  = rc.right;
+            rcTrack.top    = mid - h / 2;
+            rcTrack.bottom = rcTrack.top + h;
+
+            hbrTrack = CreateSolidBrush(
+                ui->darkMode ? RGB(60, 62, 82) : RGB(222, 225, 235));
+            if (hbrTrack) {
+                FillRect(nmcd->hdc, &rcTrack, hbrTrack);
+                DeleteObject(hbrTrack);
+            }
+
+            // 已选区间用强调色，让滑杆有明确的读数感
+            rcDone = rcTrack;
+            if (hi > lo) {
+                rcDone.right = rcTrack.left +
+                    MulDiv(pos - lo, rcTrack.right - rcTrack.left, hi - lo);
+            }
+            hbrDone = CreateSolidBrush(CLR_ACCENT);
+            if (hbrDone) {
+                FillRect(nmcd->hdc, &rcDone, hbrDone);
+                DeleteObject(hbrDone);
+            }
+            return CDRF_SKIPDEFAULT;
+        }
+        if (nmcd->dwItemSpec == TBCD_THUMB) {
+            RECT rc = nmcd->rc;
+            int  r  = UI_Scale(ui, 3);
+            HRGN rgn = CreateRoundRectRgn(rc.left, rc.top, rc.right, rc.bottom,
+                                          r * 2, r * 2);
+            HBRUSH hbr = CreateSolidBrush(CLR_ACCENT);
+
+            if (rgn && hbr) {
+                FillRgn(nmcd->hdc, rgn, hbr);
+            } else if (hbr) {
+                FillRect(nmcd->hdc, &rc, hbr);
+            }
+            if (rgn) DeleteObject(rgn);
+            if (hbr) DeleteObject(hbr);
+            return CDRF_SKIPDEFAULT;
+        }
+        if (nmcd->dwItemSpec == TBCD_TICS) {
+            return CDRF_SKIPDEFAULT;   // 未启用刻度，直接跳过
+        }
+        return CDRF_DODEFAULT;
+    }
+    return CDRF_DODEFAULT;
+}
+
 // ── 深色模式 ─────────────────────────────────────────────
 
 void UI_SetDarkMode(AppUI *ui, BOOL dark)
@@ -615,11 +692,10 @@ void UI_SetDarkMode(AppUI *ui, BOOL dark)
     if (ui->hwndComboPreset) {
         SetWindowTheme(ui->hwndComboPreset, dark ? L"DarkMode_CFD" : NULL, NULL);
     }
-    // 滑杆保持 Explorer 主题。实测：DarkMode_Explorer 对它无效，
-    // 关闭主题走经典绘制会把滑块变成灰色 3D 方块、滑道依旧是亮白，反而更差。
-    // 已知局限：深色模式下滑道仍是亮色，要彻底解决需要 owner-draw 整个滑杆。
+    // 滑杆由 UI_OnTrackbarCustomDraw 自绘（见那里的说明），
+    // 这里只需要触发重绘。
     if (ui->hwndTrackbar) {
-        SetWindowTheme(ui->hwndTrackbar, L"Explorer", NULL);
+        InvalidateRect(ui->hwndTrackbar, NULL, TRUE);
     }
 
     // 进度条：启用视觉样式时会忽略 PBM_SETBKCOLOR，
@@ -679,17 +755,20 @@ void UI_SetIntervalText(AppUI *ui, int delayMs)
     SetWindowTextW(ui->hwndEditInterval, buf);
 }
 
-void UI_SetHotkeyHint(AppUI *ui, BOOL okStart, BOOL okSearch, BOOL okStop)
+void UI_SetHotkeyHint(AppUI *ui, BOOL okStart, BOOL okSearch, BOOL okStop,
+                      BOOL okPause)
 {
-    wchar_t hint[256];
+    wchar_t hint[320];
 
     if (!ui->hwndStaticHint) return;
 
     wsprintfW(hint,
               L"Ctrl+Alt+V 开始输入%s\n"
+              L"Ctrl+Alt+P 暂停/继续%s\n"
               L"Ctrl+Alt+B 搜索答案%s\n"
               L"Ctrl+Alt+S 停止输入%s",
               okStart  ? L"" : L"（被占用）",
+              okPause  ? L"" : L"（被占用）",
               okSearch ? L"" : L"（被占用）",
               okStop   ? L"" : L"（被占用）");
     SetWindowTextW(ui->hwndStaticHint, hint);

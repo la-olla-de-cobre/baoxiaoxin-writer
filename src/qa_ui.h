@@ -19,6 +19,12 @@ typedef struct {
     HFONT         hFontUI;
     HFONT         hFontEdit;
     BOOL          darkMode;
+    int           dpi;        // 与主窗口一致：布局按此缩放
+    RECT          rcCard;     // 内容卡片，由 WM_PAINT 绘制
+    // 输入区背景。去掉 3D 边框后，白底输入框落在白卡片上会完全看不见，
+    // 所以由 WM_PAINT 在这些位置画出可见的凹槽。
+    RECT          rcWell[4];
+    int           wellCount;
     HBRUSH        hbrBg;
     HBRUSH        hbrPanel;
     HBRUSH        hbrEdit;

@@ -73,6 +73,7 @@
 #define HOTKEY_START    0xBEEF
 #define HOTKEY_SEARCH   0xBEE0
 #define HOTKEY_STOP     0xBEE2  // ESC 停止输入
+#define HOTKEY_PAUSE    0xBEE3  // 暂停 / 继续切换
 
 // ── 自定义窗口消息 ───────────────────────────────────────
 // wParam = 已输入字符数, lParam = 总字符数
@@ -86,6 +87,7 @@
 #define IDM_TRAY_SHOW           2001
 #define IDM_TRAY_QUIT           2002
 #define IDM_TRAY_RETRY_HOTKEY   2003  // 热键被占用时重新注册
+#define IDM_TRAY_ABOUT          2004  // 关于
 
 // ── 应用状态机 ───────────────────────────────────────────
 #define STATE_IDLE      0   // 空闲

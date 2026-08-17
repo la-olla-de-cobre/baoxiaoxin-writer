@@ -54,6 +54,10 @@ static BOOL   g_trayIconOwned  = FALSE;
 static BOOL g_hotkeyStart  = FALSE;
 static BOOL g_hotkeySearch = FALSE;
 static BOOL g_hotkeyStop   = FALSE;
+static BOOL g_hotkeyPause  = FALSE;
+
+// 托盘提示上次显示的百分比，避免每个字符都刷新托盘
+static int  g_lastTrayPct = -1;
 
 // 关闭按钮默认收回托盘；只有托盘菜单「退出」才真正结束进程。
 static BOOL g_allowExit      = FALSE;
@@ -85,6 +89,38 @@ static void ShowTrayBalloon(HWND hwnd, const wchar_t *title,
     Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
 
+// 更新托盘提示文字。托盘模式下主窗口不可见，进度只能靠这里体现。
+static void SetTrayTip(HWND hwnd, const wchar_t *tip)
+{
+    NOTIFYICONDATAW nid = {0};
+
+    nid.cbSize = sizeof(nid);
+    nid.hWnd   = hwnd;
+    nid.uID    = 1;
+    nid.uFlags = NIF_TIP;
+    wcsncpy(nid.szTip, tip,
+            sizeof(nid.szTip) / sizeof(nid.szTip[0]) - 1);
+    Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+
+// 关于信息。版本号与标题同源，都取自 resource.h 的 APP_VER_* 宏。
+static void ShowAbout(HWND hwnd)
+{
+    MessageBoxW(hwnd,
+        APP_NAME L"  v" APP_VERSION L"\n\n"
+        L"轻量的原生 Windows 剪贴板键盘输入工具。\n"
+        L"通过 SendInput 逐字符发送文本，适用于不便直接粘贴的输入场景。\n\n"
+        L"热键：\n"
+        L"  Ctrl+Alt+V  开始输入\n"
+        L"  Ctrl+Alt+P  暂停 / 继续\n"
+        L"  Ctrl+Alt+B  搜索题库\n"
+        L"  Ctrl+Alt+S  停止输入\n\n"
+        L"许可证：MIT License\n"
+        L"项目主页：github.com/la-olla-de-cobre/baoxiaoxin-writer\n\n"
+        L"请遵守目标网站的使用规则、考试规定与服务条款。",
+        L"关于 " APP_NAME, MB_ICONINFORMATION | MB_OK);
+}
+
 // 显示并置前主窗口。托盘左键、托盘菜单和第二个实例都走这里。
 static void ShowMainWindow(HWND hwnd)
 {
@@ -107,16 +143,20 @@ static int RegisterAppHotkeys(HWND hwnd)
     UnregisterHotKey(hwnd, HOTKEY_START);
     UnregisterHotKey(hwnd, HOTKEY_SEARCH);
     UnregisterHotKey(hwnd, HOTKEY_STOP);
+    UnregisterHotKey(hwnd, HOTKEY_PAUSE);
 
     g_hotkeyStart  = RegisterHotKey(hwnd, HOTKEY_START,  MOD_CONTROL | MOD_ALT, 'V');
     g_hotkeySearch = RegisterHotKey(hwnd, HOTKEY_SEARCH, MOD_CONTROL | MOD_ALT, 'B');
     g_hotkeyStop   = RegisterHotKey(hwnd, HOTKEY_STOP,   MOD_CONTROL | MOD_ALT, 'S');
+    g_hotkeyPause  = RegisterHotKey(hwnd, HOTKEY_PAUSE,  MOD_CONTROL | MOD_ALT, 'P');
 
     if (!g_hotkeyStart)  ++failed;
     if (!g_hotkeySearch) ++failed;
     if (!g_hotkeyStop)   ++failed;
+    if (!g_hotkeyPause)  ++failed;
 
-    UI_SetHotkeyHint(&g_ui, g_hotkeyStart, g_hotkeySearch, g_hotkeyStop);
+    UI_SetHotkeyHint(&g_ui, g_hotkeyStart, g_hotkeySearch, g_hotkeyStop,
+                     g_hotkeyPause);
     return failed;
 }
 
@@ -127,13 +167,13 @@ static void ReportHotkeyStatus(HWND hwnd, int failed, BOOL isRetry)
         UI_SetStatus(&g_ui, L"就绪");
         if (isRetry) {
             ShowTrayBalloon(hwnd, APP_NAME,
-                            L"三个热键已全部注册成功。", NIIF_INFO);
+                            L"四个热键已全部注册成功。", NIIF_INFO);
         } else {
             // 启动时主窗口是隐藏的，没有任何反馈用户无法判断是否启动成功，
             // 所以即便一切正常也要给一条确认提示。
             ShowTrayBalloon(hwnd, APP_NAME,
                 L"已在后台运行，主窗口未打开是正常的。\n"
-                L"Ctrl+Alt+V 开始输入，Ctrl+Alt+S 停止。\n"
+                L"Ctrl+Alt+V 开始输入，Ctrl+Alt+P 暂停，Ctrl+Alt+S 停止。\n"
                 L"左键单击此托盘图标可打开主窗口。",
                 NIIF_INFO);
         }
@@ -147,6 +187,7 @@ static void ReportHotkeyStatus(HWND hwnd, int failed, BOOL isRetry)
         if (!g_hotkeyStart)  wcscat(list, L"Ctrl+Alt+V（开始输入）\n");
         if (!g_hotkeySearch) wcscat(list, L"Ctrl+Alt+B（搜索题库）\n");
         if (!g_hotkeyStop)   wcscat(list, L"Ctrl+Alt+S（停止输入）\n");
+        if (!g_hotkeyPause)  wcscat(list, L"Ctrl+Alt+P（暂停/继续）\n");
 
         wsprintfW(text,
                   L"以下热键被其他程序占用，暂不可用：\n%s"
@@ -164,6 +205,30 @@ static void StopInput(void)
     if (!g_worker) return;
     Worker_Stop(g_worker);
     UI_SetStatus(&g_ui, L"正在停止输入...");
+}
+
+// 暂停 / 继续切换。原需求把它列为必备功能，Worker 侧一直实现着，
+// 但此前没有任何入口调用，等于用户用不到。
+static void TogglePause(void)
+{
+    if (!g_worker) return;
+
+    if (g_state == STATE_RUNNING) {
+        Worker_Pause(g_worker);
+        SetState(STATE_PAUSED);
+    } else if (g_state == STATE_PAUSED) {
+        Worker_Resume(g_worker);
+        SetState(STATE_RUNNING);
+    } else {
+        return;
+    }
+
+    // 暂停期间不会再有进度消息，托盘提示得在这里主动刷新一次，
+    // 否则会一直停留在「正在输入」。
+    g_lastTrayPct = -1;
+    SetTrayTip(g_ui.hwndMain,
+               g_state == STATE_PAUSED ? APP_NAME L"\n已暂停"
+                                       : APP_NAME L"\n正在输入");
 }
 
 // 开始输入（根据复选框选择数据源）
@@ -422,6 +487,8 @@ static void OnWorkerDone(BOOL stopped)
     }
 
     SetState(STATE_IDLE);
+    g_lastTrayPct = -1;
+    SetTrayTip(g_ui.hwndMain, APP_TITLE);
 
     if (!stopped) {
         UI_SetStatus(&g_ui, L"输入完成！");
@@ -574,6 +641,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             SearchFromClipboard();
         } else if (wParam == HOTKEY_STOP) {
             StopInput();
+        } else if (wParam == HOTKEY_PAUSE) {
+            TogglePause();
         }
         return 0;
 
@@ -588,6 +657,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         }
         if (id == IDM_TRAY_RETRY_HOTKEY) {
             ReportHotkeyStatus(hwnd, RegisterAppHotkeys(hwnd), TRUE);
+            return 0;
+        }
+        if (id == IDM_TRAY_ABOUT) {
+            ShowAbout(hwnd);
             return 0;
         }
         if (id == IDM_TRAY_QUIT) {
@@ -632,12 +705,43 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     case WM_HSCROLL:
         if ((HWND)lParam == g_ui.hwndTrackbar) {
             OnTrackbarChange();
+            // 已选区间随位置变化，需要重画滑道
+            InvalidateRect(g_ui.hwndTrackbar, NULL, FALSE);
         }
         return 0;
 
-    case WM_WORKER_PROGRESS:
-        UI_UpdateProgress(&g_ui, (int)wParam, (int)lParam);
+    case WM_NOTIFY: {
+        LPNMHDR hdr = (LPNMHDR)lParam;
+        // NM_CUSTOMDRAW 是负值常量，hdr->code 是 UINT，需显式转换比较
+        if (hdr && hdr->code == (UINT)NM_CUSTOMDRAW &&
+            hdr->hwndFrom == g_ui.hwndTrackbar) {
+            return UI_OnTrackbarCustomDraw(&g_ui, lParam);
+        }
+        break;
+    }
+
+    case WM_WORKER_PROGRESS: {
+        int current = (int)wParam;
+        int total   = (int)lParam;
+
+        UI_UpdateProgress(&g_ui, current, total);
+
+        // 托盘提示同步进度。只在百分比变化时更新，否则每个字符都调一次
+        // Shell_NotifyIcon 太浪费。
+        if (total > 0) {
+            int pct = (int)((LONGLONG)current * 100 / total);
+            if (pct != g_lastTrayPct) {
+                wchar_t tip[128];
+                g_lastTrayPct = pct;
+                wsprintfW(tip, L"%s\n%s %d%%  (%d / %d 字符)",
+                          APP_NAME,
+                          g_state == STATE_PAUSED ? L"已暂停" : L"正在输入",
+                          pct, current, total);
+                SetTrayTip(hwnd, tip);
+            }
+        }
         return 0;
+    }
 
     case WM_WORKER_DONE:
         OnWorkerDone((BOOL)wParam);
@@ -661,6 +765,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                             L"重试注册热键");
             }
             AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+            AppendMenuW(hMenu, MF_STRING, IDM_TRAY_ABOUT, L"关于");
             AppendMenuW(hMenu, MF_STRING, IDM_TRAY_QUIT, L"退出");
             SetMenuDefaultItem(hMenu, IDM_TRAY_SHOW, FALSE);
             SetForegroundWindow(hwnd);
@@ -690,6 +795,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         UnregisterHotKey(hwnd, HOTKEY_START);
         UnregisterHotKey(hwnd, HOTKEY_SEARCH);
         UnregisterHotKey(hwnd, HOTKEY_STOP);
+        UnregisterHotKey(hwnd, HOTKEY_PAUSE);
         // 移除托盘图标
         {
             NOTIFYICONDATAW nid = {0};

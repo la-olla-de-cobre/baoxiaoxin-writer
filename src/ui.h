@@ -92,7 +92,8 @@ void UI_SetStatus(AppUI *ui, const wchar_t *text);
 void UI_SetIntervalText(AppUI *ui, int delayMs);
 
 // 按实际注册结果刷新热键提示；被占用的热键会标注出来
-void UI_SetHotkeyHint(AppUI *ui, BOOL okStart, BOOL okSearch, BOOL okStop);
+void UI_SetHotkeyHint(AppUI *ui, BOOL okStart, BOOL okSearch, BOOL okStop,
+                      BOOL okPause);
 void UI_SetPresetSelection(AppUI *ui, int delayMs);
 void UI_ApplyWindowStyling(HWND hwnd, BOOL darkMode);
 void UI_Destroy(AppUI *ui);
@@ -110,6 +111,14 @@ void UI_ResizeToScaled(HWND hwnd, AppUI *ui, int logicalW, int logicalH);
 // ── 深色模式 ─────────────────────────────────────────────
 // 切换配色：重建画刷并整窗重绘
 void UI_SetDarkMode(AppUI *ui, BOOL dark);
+
+// 画一块圆角卡片（填充 + 1px 描边）。题库窗口复用同一实现，
+// 避免两处各画一套导致风格再次走样。
+void UI_DrawCard(HDC hdc, const RECT *rc, int radius, HBRUSH fill, COLORREF border);
+
+// 滑杆自绘。系统主题画的滑道在深色下是亮白的，且没有可用的深色主题类，
+// 只能自己画。返回 CDRF_* 结果，未处理时返回 CDRF_DODEFAULT。
+LRESULT UI_OnTrackbarCustomDraw(AppUI *ui, LPARAM lParam);
 
 // WndProc 转发
 // 绘制窗口背景：底色 + 两块圆角卡片 + 分组分隔线。
